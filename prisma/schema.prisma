@@ -1,0 +1,148 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  name      String
+  email     String   @unique
+  password  String
+  role      Role     @default(STUDENT)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  taughtClasses   Class[]          @relation("TeacherClasses")
+  enrolledClasses ClassEnrollment[]
+  scores          Score[]
+  speakingResults SpeakingResult[]
+  gamification    Gamification?
+  auditLogs       AuditLog[]
+}
+
+enum Role {
+  ADMIN
+  TEACHER
+  STUDENT
+}
+
+model Class {
+  id        String   @id @default(cuid())
+  name      String
+  teacherId String
+  teacher   User     @relation("TeacherClasses", fields: [teacherId], references: [id])
+  createdAt DateTime @default(now())
+
+  enrollments ClassEnrollment[]
+  exercises   Exercise[]
+}
+
+model ClassEnrollment {
+  id        String   @id @default(cuid())
+  classId   String
+  userId    String
+  class     Class    @relation(fields: [classId], references: [id])
+  user      User     @relation(fields: [userId], references: [id])
+  joinedAt  DateTime @default(now())
+
+  @@unique([classId, userId])
+}
+
+model Exercise {
+  id         String         @id @default(cuid())
+  classId    String
+  class      Class          @relation(fields: [classId], references: [id])
+  title      String
+  type       ExerciseType
+  status     ExerciseStatus @default(DRAFT)
+  gameConfig Json?
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
+
+  vocabulary      Vocabulary[]
+  patterns        Pattern[]
+  scores          Score[]
+  speakingResults SpeakingResult[]
+}
+
+enum ExerciseType {
+  VOCAB
+  PATTERN
+  QUIZ
+  SPEAKING
+  MIXED
+}
+
+enum ExerciseStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+model Vocabulary {
+  id         String   @id @default(cuid())
+  exerciseId String
+  exercise   Exercise @relation(fields: [exerciseId], references: [id])
+  word       String
+  meaning    String
+  audioUrl   String?
+  imageUrl   String?
+  createdAt  DateTime @default(now())
+}
+
+model Pattern {
+  id          String   @id @default(cuid())
+  exerciseId  String
+  exercise    Exercise @relation(fields: [exerciseId], references: [id])
+  sentence    String
+  translation String
+  audioUrl    String?
+  createdAt   DateTime @default(now())
+}
+
+model Score {
+  id          String   @id @default(cuid())
+  userId      String
+  exerciseId  String
+  user        User     @relation(fields: [userId], references: [id])
+  exercise    Exercise @relation(fields: [exerciseId], references: [id])
+  score       Float
+  completedAt DateTime @default(now())
+}
+
+model SpeakingResult {
+  id         String   @id @default(cuid())
+  userId     String
+  exerciseId String
+  user       User     @relation(fields: [userId], references: [id])
+  exercise   Exercise @relation(fields: [exerciseId], references: [id])
+  audioUrl   String
+  aiScore    Float?
+  feedback   String?
+  createdAt  DateTime @default(now())
+}
+
+model Gamification {
+  id          String   @id @default(cuid())
+  userId      String   @unique
+  user        User     @relation(fields: [userId], references: [id])
+  totalPoints Int      @default(0)
+  stars       Int      @default(0)
+  badges      String[]
+  streak      Int      @default(0)
+  lastActive  DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  action    String
+  target    String
+  createdAt DateTime @default(now())
+}
