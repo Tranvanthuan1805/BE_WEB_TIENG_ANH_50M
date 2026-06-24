@@ -1,0 +1,1 @@
+// Exercises validation schema placeholder

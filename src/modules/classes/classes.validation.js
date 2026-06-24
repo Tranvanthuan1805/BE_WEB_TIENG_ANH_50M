@@ -1,0 +1,1 @@
+// Classes validation schema placeholder

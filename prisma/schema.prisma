@@ -3,18 +3,26 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "mongodb"
   url      = env("DATABASE_URL")
 }
 
 model User {
-  id        String   @id @default(cuid())
-  name      String
-  email     String   @unique
-  password  String
-  role      Role     @default(STUDENT)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id         String    @id @default(auto()) @map("_id") @db.ObjectId
+  name       String
+  email       String    @unique
+  studentCode String?
+  password    String?
+  phone       String?
+  avatarUrl   String?
+  provider    Provider  @default(LOCAL)
+  providerId String?
+  role       Role      @default(STUDENT)
+  version    Int       @default(0)
+  isDeleted  Boolean   @default(false)
+  deletedAt  DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
 
   taughtClasses   Class[]          @relation("TeacherClasses")
   enrolledClasses ClassEnrollment[]
@@ -22,6 +30,7 @@ model User {
   speakingResults SpeakingResult[]
   gamification    Gamification?
   auditLogs       AuditLog[]
+  refreshTokens   RefreshToken[]
 }
 
 enum Role {
@@ -30,36 +39,63 @@ enum Role {
   STUDENT
 }
 
-model Class {
-  id        String   @id @default(cuid())
-  name      String
-  teacherId String
-  teacher   User     @relation("TeacherClasses", fields: [teacherId], references: [id])
+enum Provider {
+  LOCAL
+  GOOGLE
+}
+
+model RefreshToken {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  token     String   @unique
+  userId    String   @db.ObjectId
+  user      User     @relation(fields: [userId], references: [id])
+  expiresAt DateTime
   createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model Class {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  name      String
+  classCode String?
+  teacherId String   @db.ObjectId
+  teacher   User     @relation("TeacherClasses", fields: [teacherId], references: [id])
+  version   Int      @default(0)
+  isDeleted Boolean  @default(false)
+  deletedAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   enrollments ClassEnrollment[]
   exercises   Exercise[]
 }
 
 model ClassEnrollment {
-  id        String   @id @default(cuid())
-  classId   String
-  userId    String
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  classId   String   @db.ObjectId
+  userId    String   @db.ObjectId
   class     Class    @relation(fields: [classId], references: [id])
   user      User     @relation(fields: [userId], references: [id])
+  isDeleted Boolean  @default(false)
+  deletedAt DateTime?
   joinedAt  DateTime @default(now())
 
   @@unique([classId, userId])
 }
 
 model Exercise {
-  id         String         @id @default(cuid())
-  classId    String
+  id         String         @id @default(auto()) @map("_id") @db.ObjectId
+  classId    String         @db.ObjectId
   class      Class          @relation(fields: [classId], references: [id])
   title      String
   type       ExerciseType
   status     ExerciseStatus @default(DRAFT)
   gameConfig Json?
+  version    Int            @default(0)
+  isDeleted  Boolean        @default(false)
+  deletedAt  DateTime?
   createdAt  DateTime       @default(now())
   updatedAt  DateTime       @updatedAt
 
@@ -84,30 +120,34 @@ enum ExerciseStatus {
 }
 
 model Vocabulary {
-  id         String   @id @default(cuid())
-  exerciseId String
+  id         String   @id @default(auto()) @map("_id") @db.ObjectId
+  exerciseId String   @db.ObjectId
   exercise   Exercise @relation(fields: [exerciseId], references: [id])
   word       String
   meaning    String
   audioUrl   String?
   imageUrl   String?
+  isDeleted  Boolean  @default(false)
+  deletedAt  DateTime?
   createdAt  DateTime @default(now())
 }
 
 model Pattern {
-  id          String   @id @default(cuid())
-  exerciseId  String
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  exerciseId  String   @db.ObjectId
   exercise    Exercise @relation(fields: [exerciseId], references: [id])
   sentence    String
   translation String
   audioUrl    String?
+  isDeleted   Boolean  @default(false)
+  deletedAt   DateTime?
   createdAt   DateTime @default(now())
 }
 
 model Score {
-  id          String   @id @default(cuid())
-  userId      String
-  exerciseId  String
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId      String   @db.ObjectId
+  exerciseId  String   @db.ObjectId
   user        User     @relation(fields: [userId], references: [id])
   exercise    Exercise @relation(fields: [exerciseId], references: [id])
   score       Float
@@ -115,9 +155,9 @@ model Score {
 }
 
 model SpeakingResult {
-  id         String   @id @default(cuid())
-  userId     String
-  exerciseId String
+  id         String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId     String   @db.ObjectId
+  exerciseId String   @db.ObjectId
   user       User     @relation(fields: [userId], references: [id])
   exercise   Exercise @relation(fields: [exerciseId], references: [id])
   audioUrl   String
@@ -127,22 +167,34 @@ model SpeakingResult {
 }
 
 model Gamification {
-  id          String   @id @default(cuid())
-  userId      String   @unique
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId      String   @unique @db.ObjectId
   user        User     @relation(fields: [userId], references: [id])
   totalPoints Int      @default(0)
   stars       Int      @default(0)
-  badges      String[]
+  badges      Json     @default("[]")
   streak      Int      @default(0)
+  version     Int      @default(0)
   lastActive  DateTime @default(now())
   updatedAt   DateTime @updatedAt
 }
 
 model AuditLog {
-  id        String   @id @default(cuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id])
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId    String?  @db.ObjectId
+  user      User?    @relation(fields: [userId], references: [id])
   action    String
   target    String
   createdAt DateTime @default(now())
+}
+
+model OcrCache {
+  id             String   @id @default(auto()) @map("_id") @db.ObjectId
+  imageHash      String   @unique
+  engine         String
+  structuredData Json
+  hitCount       Int      @default(0)
+  createdAt      DateTime @default(now())
+
+  @@index([createdAt])
 }
