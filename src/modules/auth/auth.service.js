@@ -136,6 +136,13 @@ const googleLogin = async ({ idToken }) => {
   });
 
   if (user) {
+    // Google login is ONLY for teachers/admins
+    if (user.role !== 'TEACHER' && user.role !== 'ADMIN') {
+      const err = new Error('Đăng nhập bằng Google chỉ dành cho tài khoản Giáo viên');
+      err.status = 403;
+      throw err;
+    }
+
     // If user exists but registered with LOCAL provider, link Google account
     if (user.provider === 'LOCAL') {
       user = await prisma.user.update({
@@ -148,7 +155,7 @@ const googleLogin = async ({ idToken }) => {
       });
     }
   } else {
-    // Create new user from Google profile
+    // Create new user from Google profile with TEACHER role
     user = await prisma.user.create({
       data: {
         name: name || 'Google User',
@@ -156,6 +163,7 @@ const googleLogin = async ({ idToken }) => {
         provider: 'GOOGLE',
         providerId: googleId,
         avatarUrl: picture || null,
+        role: 'TEACHER', // Google registration is strictly for teachers
       },
     });
   }
