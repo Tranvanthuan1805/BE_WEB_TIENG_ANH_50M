@@ -136,6 +136,13 @@ const googleLogin = async ({ idToken }) => {
   });
 
   if (user) {
+    // Google login is ONLY for teachers/admins
+    if (user.role !== 'TEACHER' && user.role !== 'ADMIN') {
+      const err = new Error('Đăng nhập bằng Google chỉ dành cho tài khoản Giáo viên');
+      err.status = 403;
+      throw err;
+    }
+
     // If user exists but registered with LOCAL provider, link Google account
     if (user.provider === 'LOCAL') {
       user = await prisma.user.update({
@@ -176,6 +183,19 @@ const googleLogin = async ({ idToken }) => {
   };
 };
 
+// In-memory cache for rotated tokens grace period (key: hashedToken, value: { user, graceExpiresAt })
+const rotatedTokensGrace = new Map();
+
+// Clean up expired grace tokens periodically (every minute)
+setInterval(() => {
+  const now = Date.now();
+  for (const [token, data] of rotatedTokensGrace.entries()) {
+    if (data.graceExpiresAt < now) {
+      rotatedTokensGrace.delete(token);
+    }
+  }
+}, 60000).unref(); // Use .unref() so this doesn't block process exit in tests/scripts
+
 // ─── REFRESH TOKEN ───
 const refreshAccessToken = async (refreshTokenStr) => {
   if (!refreshTokenStr) {
@@ -186,6 +206,21 @@ const refreshAccessToken = async (refreshTokenStr) => {
 
   // Hash the incoming token to compare with stored hash
   const hashedToken = crypto.createHash('sha256').update(refreshTokenStr).digest('hex');
+
+  // Check in-memory grace cache for rotated tokens first (handles concurrency/race conditions)
+  const graceData = rotatedTokensGrace.get(hashedToken);
+  if (graceData) {
+    if (graceData.graceExpiresAt > Date.now()) {
+      console.log(`[DEBUG] Concurrency match: token ${refreshTokenStr.substring(0, 8)}... matched grace cache. Creating new pair.`);
+      const tokens = await createTokenPair(graceData.user);
+      return {
+        user: sanitizeUser(graceData.user),
+        ...tokens,
+      };
+    } else {
+      rotatedTokensGrace.delete(hashedToken);
+    }
+  }
 
   // Find token in DB
   const storedToken = await prisma.refreshToken.findUnique({
@@ -212,9 +247,15 @@ const refreshAccessToken = async (refreshTokenStr) => {
     throw err;
   }
 
-  // Rotation: delete old token
+  // Rotation: delete old token and store in grace cache for concurrency safety
   try {
     await prisma.refreshToken.delete({ where: { id: storedToken.id } });
+    
+    // Add to grace period cache (valid for 15 seconds)
+    rotatedTokensGrace.set(hashedToken, {
+      user: storedToken.user,
+      graceExpiresAt: Date.now() + 15000, // 15 seconds
+    });
   } catch (error) {
     if (error.code === 'P2025') {
       const err = new Error('Refresh token không hợp lệ hoặc đã được sử dụng');

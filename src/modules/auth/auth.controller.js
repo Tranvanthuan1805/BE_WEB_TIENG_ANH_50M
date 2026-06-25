@@ -49,6 +49,7 @@ const googleLogin = async (req, res, next) => {
   try {
     const result = await authService.googleLogin(req.body);
 
+    console.log(`[DEBUG] Google login successful. Setting refresh token cookie: ${result.refreshToken ? result.refreshToken.substring(0, 8) + '...' : 'null'}`);
     // Set refresh token in HttpOnly cookie
     res.cookie(REFRESH_COOKIE_NAME, result.refreshToken, COOKIE_OPTIONS);
 
@@ -57,6 +58,7 @@ const googleLogin = async (req, res, next) => {
       accessToken: result.accessToken,
     });
   } catch (err) {
+    console.error(`[DEBUG] Google login error:`, err);
     next(err);
   }
 };
@@ -65,8 +67,10 @@ const googleLogin = async (req, res, next) => {
 const refreshToken = async (req, res, next) => {
   try {
     const token = req.cookies?.[REFRESH_COOKIE_NAME];
+    console.log(`[DEBUG] Refreshing token. Received cookie '${REFRESH_COOKIE_NAME}': ${token ? token.substring(0, 8) + '...' : 'undefined'}`);
     const result = await authService.refreshAccessToken(token);
 
+    console.log(`[DEBUG] Token refreshed successfully. Setting new refresh token cookie: ${result.refreshToken ? result.refreshToken.substring(0, 8) + '...' : 'null'}`);
     // Set new refresh token (rotation)
     res.cookie(REFRESH_COOKIE_NAME, result.refreshToken, COOKIE_OPTIONS);
 
@@ -75,6 +79,7 @@ const refreshToken = async (req, res, next) => {
       accessToken: result.accessToken,
     });
   } catch (err) {
+    console.error(`[DEBUG] Refresh token error:`, err.message);
     next(err);
   }
 };
