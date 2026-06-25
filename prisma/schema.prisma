@@ -199,3 +199,27 @@ model OcrCache {
 
   @@index([createdAt])
 }
+
+// Cache BỀN VỮNG cho làm giàu từ vựng (dictionaryapi.dev) — mỗi từ 1 bản ghi, tái dùng mãi.
+model DictionaryCache {
+  id              String   @id @default(auto()) @map("_id") @db.ObjectId
+  word            String   @unique
+  phonetic        String?
+  audioUrl        String?
+  partOfSpeech    String?
+  definitionEn    String?
+  exampleSentence String?
+  hitCount        Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+// Cache BỀN VỮNG cho bản dịch câu (MyMemory) — key = câu đã chuẩn hoá (lowercase/trim).
+model TranslationCache {
+  id             String   @id @default(auto()) @map("_id") @db.ObjectId
+  originalText   String   @unique
+  translatedText String
+  langPair       String   @default("en|vi")
+  hitCount       Int      @default(0)
+  createdAt      DateTime @default(now())
+}

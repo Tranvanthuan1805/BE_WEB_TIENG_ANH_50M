@@ -1,5 +1,6 @@
 const https = require('https');
 const env = require('../../config/env');
+const prisma = require('../../config/database');
 
 /**
  * ENRICH SERVICE — "làm giàu" Từ vựng & Mẫu câu (sau khi OCR/nhập tay) thành dữ liệu
@@ -50,9 +51,23 @@ const mapLimit = async (items, limit, fn) => {
 };
 
 // ── 1) dictionaryapi.dev: phonetic, audio, pos, definition, example ──
+// L1 = in-memory (nhanh nhất), L2 = DB DictionaryCache (bền, dùng chung mọi bài), L3 = gọi API.
+const DICT_FIELDS = ['phonetic', 'audioUrl', 'partOfSpeech', 'definitionEn', 'exampleSentence'];
 const fetchDictionary = async (word) => {
   const cached = getC(dictCache, word);
   if (cached) return cached;
+
+  // L2: kiểm tra DB trước khi gọi API
+  try {
+    const row = await prisma.dictionaryCache.findUnique({ where: { word } });
+    if (row) {
+      const result = { phonetic: row.phonetic || '', audioUrl: row.audioUrl || '', partOfSpeech: row.partOfSpeech || '', definitionEn: row.definitionEn || '', exampleSentence: row.exampleSentence || '' };
+      setC(dictCache, word, result);
+      prisma.dictionaryCache.update({ where: { word }, data: { hitCount: { increment: 1 } } }).catch(() => {});
+      return result;
+    }
+  } catch (e) { /* DB lỗi → bỏ qua, gọi API */ }
+
   let result = { phonetic: '', audioUrl: '', partOfSpeech: '', definitionEn: '', exampleSentence: '' };
   try {
     const data = await httpGetJson(`https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(word)}`);
@@ -75,6 +90,10 @@ const fetchDictionary = async (word) => {
     console.error(`[ENRICH] dictionary "${word}":`, err.message);
   }
   setC(dictCache, word, result);
+  // Lưu DB CHỈ khi có dữ liệu thật (tránh cache lỗi mạng/404 → cho phép thử lại sau)
+  if (DICT_FIELDS.some((f) => result[f])) {
+    prisma.dictionaryCache.upsert({ where: { word }, create: { word, ...result }, update: result }).catch(() => {});
+  }
   return result;
 };
 
@@ -84,6 +103,17 @@ const translateEnToVi = async (text) => {
   if (!key) return '';
   const cached = getC(transCache, key);
   if (cached !== undefined) return cached;
+
+  // L2: DB TranslationCache
+  try {
+    const row = await prisma.translationCache.findUnique({ where: { originalText: key } });
+    if (row) {
+      setC(transCache, key, row.translatedText);
+      prisma.translationCache.update({ where: { originalText: key }, data: { hitCount: { increment: 1 } } }).catch(() => {});
+      return row.translatedText;
+    }
+  } catch (e) { /* DB lỗi → gọi API */ }
+
   let vi = '';
   try {
     const de = env.myMemoryEmail ? `&de=${encodeURIComponent(env.myMemoryEmail)}` : '';
@@ -96,6 +126,10 @@ const translateEnToVi = async (text) => {
     console.error(`[ENRICH] translate "${text.slice(0, 30)}":`, err.message);
   }
   setC(transCache, key, vi);
+  // Lưu DB CHỈ khi dịch được (không cache rỗng → cho phép thử lại)
+  if (vi) {
+    prisma.translationCache.upsert({ where: { originalText: key }, create: { originalText: key, translatedText: vi, langPair: 'en|vi' }, update: { translatedText: vi } }).catch(() => {});
+  }
   return vi;
 };
 
@@ -179,10 +213,18 @@ const enrichSentence = async (s) => {
 /**
  * Tầng 1: làm giàu cả bộ {vocabularies, sentences} — dictionary + nghĩa + dịch câu.
  * (KHÔNG kèm distractors; gọi addDistractors riêng ở Tầng 2.)
+ *
+ * Tối ưu tốc độ: chạy SONG SONG nhóm từ vựng (dictionaryapi.dev) và nhóm câu (MyMemory),
+ * concurrency cao hơn (dict=8 vì fair-use không giới hạn; trans=6 cho an toàn quota MyMemory).
  */
+const CONC_DICT = Number(env.enrichConcurrencyDict || 8);
+const CONC_TRANS = Number(env.enrichConcurrencyTrans || 6);
+
 const enrichAll = async (data) => {
-  const vocabularies = await mapLimit(data?.vocabularies || [], 4, (v) => enrichVocabulary(v));
-  const sentences = await mapLimit(data?.sentences || [], 4, (s) => enrichSentence(s));
+  const [vocabularies, sentences] = await Promise.all([
+    mapLimit(data?.vocabularies || [], CONC_DICT, (v) => enrichVocabulary(v)),
+    mapLimit(data?.sentences || [], CONC_TRANS, (s) => enrichSentence(s)),
+  ]);
   return { vocabularies, sentences };
 };
 
