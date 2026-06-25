@@ -75,6 +75,7 @@ const validate = (schema) => (req, res, next) => {
 
   if (error) {
     const messages = error.details.map((d) => d.message);
+    console.error('[VALIDATION ERROR]', messages, 'Req Body:', req.body);
     return res.status(422).json({
       success: false,
       error: 'Dữ liệu không hợp lệ',
