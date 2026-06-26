@@ -188,8 +188,136 @@ const createClass = async (teacher, body) => {
   };
 };
 
+// ── Lấy lớp do GV sở hữu (chặn truy cập lớp người khác) ──
+const getOwnedClass = async (user, classId) => {
+  const cls = await prisma.class.findFirst({
+    where: { id: classId, teacherId: user.id, isDeleted: false },
+  });
+  if (!cls) {
+    const e = new Error('Không tìm thấy lớp học hoặc bạn không có quyền truy cập.');
+    e.status = 404;
+    throw e;
+  }
+  return cls;
+};
+
+// ── Chi tiết lớp + danh sách học sinh (chưa bị xóa mềm) ──
+const getClassDetail = async (user, classId) => {
+  const cls = await getOwnedClass(user, classId);
+  const enrollments = await prisma.classEnrollment.findMany({
+    where: { classId, isDeleted: false },
+    include: { user: true },
+    orderBy: { joinedAt: 'asc' },
+  });
+  const students = enrollments
+    .filter((e) => e.user && !e.user.isDeleted)
+    .map((e) => ({
+      id: e.user.id,
+      enrollmentId: e.id,
+      name: e.user.name,
+      studentCode: e.user.studentCode,
+      email: e.user.email,
+    }));
+  return {
+    class: { id: cls.id, name: cls.name, classCode: cls.classCode, description: cls.description },
+    students,
+  };
+};
+
+// ── Sửa thông tin lớp (tên / mô tả) ──
+const updateClass = async (user, classId, body) => {
+  await getOwnedClass(user, classId);
+  const data = {};
+  if (typeof body.name === 'string' && body.name.trim()) data.name = body.name.trim();
+  if (typeof body.description === 'string') data.description = body.description.trim();
+  if (Object.keys(data).length === 0) {
+    const e = new Error('Không có thông tin nào để cập nhật.');
+    e.status = 400;
+    throw e;
+  }
+  const c = await prisma.class.update({ where: { id: classId }, data });
+  return { class: { id: c.id, name: c.name, classCode: c.classCode, description: c.description } };
+};
+
+// ── Thêm 1 học sinh vào lớp (tạo tài khoản + ghi danh) ──
+const addStudent = async (user, classId, body) => {
+  const cls = await getOwnedClass(user, classId);
+  const name = String(body.name || '').trim();
+  if (!name) {
+    const e = new Error('Tên học sinh không được để trống.');
+    e.status = 400;
+    throw e;
+  }
+  const plainPassword = body.password && String(body.password).length >= 4 ? String(body.password) : '123456';
+
+  // STT tăng dần theo TỔNG ghi danh từng có (kể cả đã xóa) → mã HS không trùng.
+  const total = await prisma.classEnrollment.count({ where: { classId } });
+  const orderIndex = total + 1;
+  const initials = getInitials(name);
+  const studentCode = `${cls.classCode || 'TAS'}${initials}${orderIndex}`;
+  const email = `${studentCode.toLowerCase()}@smarthomework.edu.vn`;
+  const userId = generateObjectId();
+  const passwordHash = await bcrypt.hash(plainPassword, 10);
+
+  await prisma.user.create({
+    data: { id: userId, name, studentCode, email, password: passwordHash, role: 'STUDENT', provider: 'LOCAL', version: 0, isDeleted: false },
+  });
+  await prisma.classEnrollment.create({
+    data: { id: generateObjectId(), classId, userId, isDeleted: false },
+  });
+
+  return { student: { id: userId, name, studentCode, email, plainPassword } };
+};
+
+// ── Sửa học sinh (tên / đặt lại mật khẩu) ──
+const updateStudent = async (user, classId, studentId, body) => {
+  await getOwnedClass(user, classId);
+  const enr = await prisma.classEnrollment.findFirst({ where: { classId, userId: studentId, isDeleted: false } });
+  if (!enr) {
+    const e = new Error('Học sinh không thuộc lớp này.');
+    e.status = 404;
+    throw e;
+  }
+  const data = {};
+  if (typeof body.name === 'string' && body.name.trim()) data.name = body.name.trim();
+  let plainPassword;
+  if (body.password && String(body.password).length >= 4) {
+    plainPassword = String(body.password);
+    data.password = await bcrypt.hash(plainPassword, 10);
+  }
+  if (Object.keys(data).length === 0) {
+    const e = new Error('Không có thông tin nào để cập nhật.');
+    e.status = 400;
+    throw e;
+  }
+  const u = await prisma.user.update({ where: { id: studentId }, data });
+  return { student: { id: u.id, name: u.name, studentCode: u.studentCode, email: u.email }, plainPassword };
+};
+
+// ── Xóa MỀM học sinh khỏi lớp (đánh dấu isDeleted, không xóa thật) ──
+const removeStudent = async (user, classId, studentId) => {
+  await getOwnedClass(user, classId);
+  const enr = await prisma.classEnrollment.findFirst({ where: { classId, userId: studentId, isDeleted: false } });
+  if (!enr) {
+    const e = new Error('Học sinh không thuộc lớp này.');
+    e.status = 404;
+    throw e;
+  }
+  const now = new Date();
+  await prisma.$transaction([
+    prisma.classEnrollment.update({ where: { id: enr.id }, data: { isDeleted: true, deletedAt: now } }),
+    prisma.user.update({ where: { id: studentId }, data: { isDeleted: true, deletedAt: now } }),
+  ]);
+  return { ok: true };
+};
+
 module.exports = {
   getAll,
   createClass,
+  getClassDetail,
+  updateClass,
+  addStudent,
+  updateStudent,
+  removeStudent,
 };
 
