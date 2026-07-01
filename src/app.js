@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const cookieParser = require('cookie-parser');
+const path = require('path');
 const { errorHandler } = require('./middleware/errorHandler');
 const { apiLimiter } = require('./middleware/rateLimiter');
 const { frontendUrl } = require('./config/env');
@@ -26,6 +27,9 @@ app.use(express.urlencoded({ extended: true }));
 // ── Cookie Parser (for HttpOnly refresh token) ──
 app.use(cookieParser());
 
+// ── Serve uploads folder for speaking results ──
+app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
+
 // ── Global Rate Limiting ──
 app.use('/api', apiLimiter);
 
@@ -45,6 +49,9 @@ app.use('/api/speaking', require('./modules/speaking/speaking.routes'));
 app.use('/api/ocr', require('./modules/ocr/ocr.routes'));
 app.use('/api/gamification', require('./modules/gamification/gamification.routes'));
 app.use('/api/admin', require('./modules/admin/admin.routes'));
+app.use('/api/ranking', require('./modules/ranking/ranking.routes'));
+app.use('/api/teacher', require('./modules/teacher/teacher.routes'));
+app.use('/api/student', require('./modules/student/student.routes'));
 
 // ── Error Handler (must be last) ──
 app.use(errorHandler);
