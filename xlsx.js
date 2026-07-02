@@ -1,0 +1,1 @@
+Redirecting to /xlsx@0.18.5/xlsx.js

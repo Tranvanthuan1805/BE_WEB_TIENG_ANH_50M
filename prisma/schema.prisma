@@ -31,6 +31,8 @@ model User {
   gamification    Gamification?
   auditLogs       AuditLog[]
   refreshTokens   RefreshToken[]
+  vocabularyProgress UserVocabularyProgress[]
+  exerciseProgress ExerciseProgress[]
 }
 
 enum Role {
@@ -104,6 +106,7 @@ model Exercise {
   patterns        Pattern[]
   scores          Score[]
   speakingResults SpeakingResult[]
+  exerciseProgress ExerciseProgress[]
 }
 
 enum ExerciseType {
@@ -131,6 +134,8 @@ model Vocabulary {
   isDeleted  Boolean  @default(false)
   deletedAt  DateTime?
   createdAt  DateTime @default(now())
+
+  userProgress UserVocabularyProgress[]
 }
 
 model Pattern {
@@ -223,3 +228,32 @@ model TranslationCache {
   hitCount       Int      @default(0)
   createdAt      DateTime @default(now())
 }
+
+model UserVocabularyProgress {
+  id           String     @id @default(auto()) @map("_id") @db.ObjectId
+  userId       String     @db.ObjectId
+  user         User       @relation(fields: [userId], references: [id])
+  vocabularyId String     @db.ObjectId
+  vocabulary   Vocabulary @relation(fields: [vocabularyId], references: [id])
+  level        Int        @default(0) // 0: new, 1: learning, 2: temp, 3: long, 4: mastered
+  nextReview   DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  @@unique([userId, vocabularyId])
+}
+
+model ExerciseProgress {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId      String   @db.ObjectId
+  exerciseId  String   @db.ObjectId
+  type        String   // "vocab_flashcard", "quiz", "sentence_arrange", etc.
+  data        Json     // Stores: { currentIndex, answers: [], score, completed, ... }
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  user        User     @relation(fields: [userId], references: [id])
+  exercise    Exercise @relation(fields: [exerciseId], references: [id])
+
+  @@unique([userId, exerciseId, type])
+}
+

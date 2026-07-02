@@ -1,6 +1,42 @@
 const service = require('./exercises.service');
 const { ok, fail } = require('../../utils/response');
 
+const getAllForStudent = async (req, res, next) => {
+  try {
+    const data = await service.getAllForStudent(req.user);
+    ok(res, data);
+  } catch (err) {
+    next(err);
+  }
+};
+
+const getQuizForStudent = async (req, res, next) => {
+  try {
+    const data = await service.getQuizForStudent(req.user, req.params.id);
+    ok(res, data);
+  } catch (err) {
+    next(err);
+  }
+};
+
+const getVocabForStudent = async (req, res, next) => {
+  try {
+    const data = await service.getVocabForStudent(req.user, req.params.id);
+    ok(res, data);
+  } catch (err) {
+    next(err);
+  }
+};
+
+const getPatternForStudent = async (req, res, next) => {
+  try {
+    const data = await service.getPatternForStudent(req.user, req.params.id);
+    ok(res, data);
+  } catch (err) {
+    next(err);
+  }
+};
+
 const guard = (handler) => async (req, res, next) => {
   try {
     if (req.user.role !== 'TEACHER' && req.user.role !== 'ADMIN') {
@@ -28,4 +64,4 @@ const remove = guard(async (req, res) => {
   ok(res, data);
 });
 
-module.exports = { getAll, create, remove };
+module.exports = { create, getAll, remove, getAllForStudent, getQuizForStudent, getVocabForStudent, getPatternForStudent };

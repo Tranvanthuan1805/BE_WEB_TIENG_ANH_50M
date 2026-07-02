@@ -10,4 +10,22 @@ const getAll = async (req, res, next) => {
   }
 };
 
-module.exports = { getAll };
+const saveScore = async (req, res, next) => {
+  try {
+    const data = await service.saveScore(req.user, req.body);
+    ok(res, data);
+  } catch (err) {
+    next(err);
+  }
+};
+
+const getExerciseLeaderboard = async (req, res, next) => {
+  try {
+    const data = await service.getExerciseLeaderboard(req.params.exerciseId, req.user);
+    ok(res, data);
+  } catch (err) {
+    next(err);
+  }
+};
+
+module.exports = { getAll, saveScore, getExerciseLeaderboard };

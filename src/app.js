@@ -6,6 +6,8 @@ const { errorHandler } = require('./middleware/errorHandler');
 const { apiLimiter } = require('./middleware/rateLimiter');
 const { frontendUrl } = require('./config/env');
 
+
+
 const app = express();
 
 // ── Security Headers ──
@@ -44,6 +46,7 @@ app.use('/api/scores', require('./modules/scores/scores.routes'));
 app.use('/api/speaking', require('./modules/speaking/speaking.routes'));
 app.use('/api/ocr', require('./modules/ocr/ocr.routes'));
 app.use('/api/gamification', require('./modules/gamification/gamification.routes'));
+app.use('/api/progress', require('./modules/progress/progress.routes'));
 app.use('/api/admin', require('./modules/admin/admin.routes'));
 
 // ── Error Handler (must be last) ──
