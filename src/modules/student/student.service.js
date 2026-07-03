@@ -1,4 +1,5 @@
 const prisma = require('../../config/database');
+const gamesService = require('../ocr/games.service');
 
 const getStudentScores = async (user, { period }) => {
   const filterDate = new Date();
@@ -99,4 +100,196 @@ const getStudentScores = async (user, { period }) => {
   };
 };
 
-module.exports = { getStudentScores };
+const getStudentExercises = async (user) => {
+  const enrollments = await prisma.classEnrollment.findMany({
+    where: { userId: user.id, isDeleted: false },
+    select: { classId: true }
+  });
+  const classIds = enrollments.map(e => e.classId);
+
+  const exercises = await prisma.exercise.findMany({
+    where: {
+      classId: { in: classIds },
+      status: 'PUBLISHED',
+      isDeleted: false
+    },
+    orderBy: { createdAt: 'desc' },
+    select: {
+      id: true,
+      title: true,
+      type: true,
+      classId: true,
+      gameConfig: true,
+      createdAt: true,
+      class: {
+        select: {
+          name: true,
+          classCode: true
+        }
+      }
+    }
+  });
+
+  const scores = await prisma.score.findMany({
+    where: { userId: user.id }
+  });
+  const scoreMap = Object.fromEntries(scores.map(s => [s.exerciseId, s.score]));
+
+  return exercises.map(ex => ({
+    id: ex.id,
+    title: ex.title,
+    type: ex.type,
+    classId: ex.classId,
+    className: ex.class?.name || '—',
+    classCode: ex.class?.classCode || '',
+    counts: ex.gameConfig?.counts || { vocab: 0, sentence: 0, question: 0 },
+    score: scoreMap[ex.id] ?? null,
+    completed: scoreMap[ex.id] !== undefined,
+    createdAt: ex.createdAt
+  }));
+};
+
+const getStudentExerciseDetail = async (user, id) => {
+  const exercise = await prisma.exercise.findFirst({
+    where: { id: id, isDeleted: false },
+    include: { class: true }
+  });
+  if (!exercise) {
+    const err = new Error('Không tìm thấy bài tập.');
+    err.status = 404;
+    throw err;
+  }
+
+  const enrollment = await prisma.classEnrollment.findFirst({
+    where: { userId: user.id, classId: exercise.classId, isDeleted: false }
+  });
+  if (!enrollment) {
+    const err = new Error('Bạn không có quyền truy cập bài tập này.');
+    err.status = 403;
+    throw err;
+  }
+
+  const config = exercise.gameConfig || {};
+  const generated = await gamesService.generate({
+    vocabText: config.vocabText || '',
+    sentenceText: config.sentenceText || '',
+    mcqText: config.mcqText || '',
+    grade: 0
+  });
+
+  return {
+    id: exercise.id,
+    title: exercise.title,
+    type: exercise.type,
+    classId: exercise.classId,
+    className: exercise.class?.name || '—',
+    games: generated.games,
+    counts: generated.meta.counts
+  };
+};
+
+const submitExerciseScore = async (user, exerciseId, { score }) => {
+  if (score === undefined || score === null) {
+    const err = new Error('Thiếu điểm số.');
+    err.status = 400;
+    throw err;
+  }
+
+  const exercise = await prisma.exercise.findFirst({
+    where: { id: exerciseId, isDeleted: false }
+  });
+  if (!exercise) {
+    const err = new Error('Không tìm thấy bài tập.');
+    err.status = 404;
+    throw err;
+  }
+
+  const enrollment = await prisma.classEnrollment.findFirst({
+    where: { userId: user.id, classId: exercise.classId, isDeleted: false }
+  });
+  if (!enrollment) {
+    const err = new Error('Bạn không có quyền nộp bài tập này.');
+    err.status = 403;
+    throw err;
+  }
+
+  const existingScore = await prisma.score.findFirst({
+    where: { userId: user.id, exerciseId }
+  });
+
+  let savedScore;
+  if (!existingScore) {
+    savedScore = await prisma.score.create({
+      data: {
+        userId: user.id,
+        exerciseId,
+        score: Number(score)
+      }
+    });
+  } else if (Number(score) > existingScore.score) {
+    savedScore = await prisma.score.update({
+      where: { id: existingScore.id },
+      data: { score: Number(score) }
+    });
+  } else {
+    savedScore = existingScore;
+  }
+
+  const earnedStars = Number(score) >= 80 ? 3 : Number(score) >= 50 ? 2 : 1;
+  const points = earnedStars * 10;
+
+  let gamification = await prisma.gamification.findUnique({
+    where: { userId: user.id }
+  });
+
+  const now = new Date();
+  if (!gamification) {
+    gamification = await prisma.gamification.create({
+      data: {
+        userId: user.id,
+        stars: earnedStars,
+        totalPoints: points,
+        streak: 1,
+        lastActive: now
+      }
+    });
+  } else {
+    let newStreak = gamification.streak;
+    const lastActive = new Date(gamification.lastActive);
+
+    if (now.toDateString() !== lastActive.toDateString()) {
+      const diffTime = Math.abs(now - lastActive);
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+      if (diffDays === 1) {
+        newStreak += 1;
+      } else if (diffDays > 1) {
+        newStreak = 1;
+      }
+    }
+
+    gamification = await prisma.gamification.update({
+      where: { id: gamification.id },
+      data: {
+        stars: gamification.stars + earnedStars,
+        totalPoints: gamification.totalPoints + points,
+        streak: newStreak,
+        lastActive: now
+      }
+    });
+  }
+
+  return {
+    success: true,
+    score: savedScore.score,
+    stars: earnedStars,
+    points,
+    streak: gamification.streak
+  };
+};
+
+module.exports = { 
+  getStudentScores,
+  getStudentExercises,
+  getStudentExerciseDetail,
+  submitExerciseScore
+};
