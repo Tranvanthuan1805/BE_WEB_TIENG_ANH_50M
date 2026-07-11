@@ -150,7 +150,7 @@ const gradeSpeaking = async (user, { exerciseId, correctText, file }) => {
   }
 
   // 2. Perform STT via Gemini or mock fallback
-  const audioBuffer = fs.readFileSync(file.path);
+  const audioBuffer = file.buffer;
   let transcript = await transcribeAudioWithGemini(audioBuffer, file.mimetype);
   
   // If transcription failed or returned empty, fallback to a mock transcript for testing stability
@@ -161,13 +161,18 @@ const gradeSpeaking = async (user, { exerciseId, correctText, file }) => {
   // 3. Compute score
   const score = calculateScore(transcript, correctText);
 
-  // 4. Save speaking result
-  const localUrl = `/uploads/speaking/${path.basename(file.path)}`;
+  // 4. Upload to Cloudflare R2 and Save speaking result
+  const { uploadToR2 } = require('../../utils/r2');
+  const ext = path.extname(file.originalname) || '.webm';
+  const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+  const r2FileName = `speaking-${uniqueSuffix}${ext}`;
+  const r2Url = await uploadToR2(audioBuffer, r2FileName, file.mimetype);
+
   const speakingResult = await prisma.speakingResult.create({
     data: {
       userId: user.id,
       exerciseId: targetExerciseId,
-      audioUrl: localUrl,
+      audioUrl: r2Url,
       aiScore: score,
       feedback: `Độ chính xác: ${score}%. Bạn đọc là: "${transcript}"`
     }

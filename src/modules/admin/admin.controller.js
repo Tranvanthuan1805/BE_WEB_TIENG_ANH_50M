@@ -87,6 +87,18 @@ const getAuditLogs = async (req, res, next) => {
   }
 };
 
+// ─── STATS CONTROLLER ───
+
+const getStats = async (req, res, next) => {
+  try {
+    const { classId, exerciseId, studentId } = req.query;
+    const data = await service.getStats({ classId, exerciseId, studentId });
+    ok(res, data);
+  } catch (err) {
+    next(err);
+  }
+};
+
 module.exports = {
   getUsers,
   createUser,
@@ -96,5 +108,6 @@ module.exports = {
   getClasses,
   createClass,
   deleteClass,
-  getAuditLogs
+  getAuditLogs,
+  getStats
 };

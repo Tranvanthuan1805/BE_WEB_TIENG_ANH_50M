@@ -1,6 +1,12 @@
 const router = require('express').Router();
 const multer = require('multer');
 const controller = require('./ocr.controller');
+const auth = require('../../middleware/auth');
+const { requireRole } = require('../../middleware/rbac');
+
+// Toàn bộ route OCR chỉ dành cho Giáo viên/Admin (tốn chi phí gọi AI).
+router.use(auth);
+router.use(requireRole('TEACHER', 'ADMIN'));
 
 // memoryStorage: giữ buffer để hash + gửi LLM / parse tại máy, KHÔNG ghi đĩa.
 const ALLOWED = [
@@ -30,7 +36,7 @@ const uploadSingle = (req, res, next) =>
     });
   });
 
-// OCR nhanh: ảnh/Word/PDF → { vocabularies, sentences, questions }. Route mở (chưa gắn auth).
+// OCR nhanh: ảnh/Word/PDF → { vocabularies, sentences, questions }.
 router.post('/extract', uploadSingle, controller.extract);
 
 // Làm giàu (defer/lazy) — JSON.

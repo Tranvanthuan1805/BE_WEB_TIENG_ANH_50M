@@ -91,12 +91,41 @@ const getStudentScores = async (user, { period }) => {
     score: Math.round(trendMap[date].sum / trendMap[date].count)
   })).sort((a, b) => a.date.localeCompare(b.date));
 
+  // Fetch recent speaking attempts for the student, including teacher feedback
+  const speakingResultsList = await prisma.speakingResult.findMany({
+    where: { userId: user.id },
+    include: {
+      exercise: {
+        select: {
+          title: true
+        }
+      }
+    },
+    orderBy: {
+      createdAt: 'desc'
+    },
+    take: 20
+  });
+
+  const speakingResults = speakingResultsList.map(r => ({
+    id: r.id,
+    exerciseId: r.exerciseId,
+    exerciseTitle: r.exercise?.title || 'Luyện nói',
+    audioUrl: r.audioUrl,
+    aiScore: r.aiScore,
+    feedback: r.feedback,
+    teacherFeedback: r.teacherFeedback,
+    feedbackAudioUrl: r.feedbackAudioUrl,
+    createdAt: r.createdAt
+  }));
+
   return {
     totalStars: gamification.stars,
     streak: gamification.streak,
     bySkill,
     history,
-    weeklyTrend
+    weeklyTrend,
+    speakingResults
   };
 };
 
@@ -170,6 +199,21 @@ const getStudentExerciseDetail = async (user, id) => {
   }
 
   const config = exercise.gameConfig || {};
+
+  // Nếu GV đã kích hoạt game (xem trước & giao bài), dùng đúng bản đã lưu — tránh sinh lại
+  // ngẫu nhiên khác với bản GV đã duyệt, và đỡ tốn lượt gọi AI enrichment mỗi lần học sinh mở bài.
+  if (config.games) {
+    return {
+      id: exercise.id,
+      title: exercise.title,
+      type: exercise.type,
+      classId: exercise.classId,
+      className: exercise.class?.name || '—',
+      games: config.games,
+      counts: config.gamesMeta?.counts || config.counts
+    };
+  }
+
   const generated = await gamesService.generate({
     vocabText: config.vocabText || '',
     sentenceText: config.sentenceText || '',

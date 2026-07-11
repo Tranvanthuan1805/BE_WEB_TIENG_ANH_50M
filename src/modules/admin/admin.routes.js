@@ -22,4 +22,7 @@ router.delete('/classes/:id', controller.deleteClass);
 // Audit logs
 router.get('/audit-logs', controller.getAuditLogs);
 
+// Statistics
+router.get('/stats', controller.getStats);
+
 module.exports = router;

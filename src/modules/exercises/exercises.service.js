@@ -35,13 +35,19 @@ const create = async (user, body) => {
     e.status = 400; throw e;
   }
 
+  // Nếu GV đã bấm "Tạo & Xem trước bài tập" (kích hoạt game) trước khi giao bài, lưu lại
+  // đúng bản đã xem trước (games + meta) để học sinh chơi đúng như GV đã duyệt, thay vì
+  // để hệ thống sinh lại (có yếu tố ngẫu nhiên trong xáo trộn đáp án/game 2, 3).
+  const gamesResult = body.games && typeof body.games === 'object' ? body.games : null;
+  const gamesMeta = body.gamesMeta && typeof body.gamesMeta === 'object' ? body.gamesMeta : null;
+
   const ex = await prisma.exercise.create({
     data: {
       classId,
       title,
       type: decideType(counts),
       status: 'PUBLISHED',
-      gameConfig: { vocabText, sentenceText, mcqText, counts },
+      gameConfig: { vocabText, sentenceText, mcqText, counts, games: gamesResult, gamesMeta },
     },
   });
 

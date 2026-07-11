@@ -25,4 +25,21 @@ const getStudentDetails = async (req, res, next) => {
   }
 };
 
-module.exports = { getScores, getStudentDetails };
+const updateSpeakingFeedback = async (req, res, next) => {
+  try {
+    const { resultId } = req.params;
+    const { teacherFeedback, deleteAudio } = req.body;
+    const file = req.file;
+
+    const data = await service.updateSpeakingFeedback(req.user, resultId, {
+      teacherFeedback,
+      deleteAudio,
+      file
+    });
+    ok(res, data);
+  } catch (err) {
+    next(err);
+  }
+};
+
+module.exports = { getScores, getStudentDetails, updateSpeakingFeedback };

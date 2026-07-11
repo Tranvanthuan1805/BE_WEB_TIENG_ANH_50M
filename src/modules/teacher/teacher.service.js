@@ -163,8 +163,88 @@ const getStudentDetails = async (user, { studentId, period }) => {
     score: r.aiScore,
     audioUrl: r.audioUrl,
     feedback: r.feedback,
+    teacherFeedback: r.teacherFeedback,
+    feedbackAudioUrl: r.feedbackAudioUrl,
     completedAt: r.createdAt
   }));
 };
 
-module.exports = { getTeacherScores, getStudentDetails };
+const updateSpeakingFeedback = async (user, resultId, { teacherFeedback, deleteAudio, file }) => {
+  // 1. Find speaking result
+  const speakingResult = await prisma.speakingResult.findUnique({
+    where: { id: resultId },
+    include: {
+      exercise: true
+    }
+  });
+
+  if (!speakingResult) {
+    const err = new Error('Không tìm thấy bài nộp của học sinh.');
+    err.status = 404;
+    throw err;
+  }
+
+  // 2. Verify teacher owns the class of this exercise
+  const cls = await prisma.class.findFirst({
+    where: { id: speakingResult.exercise.classId, teacherId: user.id, isDeleted: false }
+  });
+
+  if (!cls) {
+    const err = new Error('Bạn không có quyền nhận xét bài nộp này.');
+    err.status = 403;
+    throw err;
+  }
+
+  const { uploadToR2, deleteFromR2, getR2KeyFromUrl } = require('../../utils/r2');
+  let feedbackAudioUrl = speakingResult.feedbackAudioUrl;
+
+  // 3. Delete existing audio if requested
+  if (deleteAudio === 'true' && speakingResult.feedbackAudioUrl) {
+    try {
+      const oldKey = getR2KeyFromUrl(speakingResult.feedbackAudioUrl);
+      if (oldKey) {
+        await deleteFromR2(oldKey);
+      }
+    } catch (err) {
+      console.error('Failed to delete feedback audio from R2:', err);
+    }
+    feedbackAudioUrl = null;
+  }
+
+  // 4. If teacher uploaded new recording file, upload to R2 and clean up the old one
+  if (file) {
+    if (speakingResult.feedbackAudioUrl) {
+      try {
+        const oldKey = getR2KeyFromUrl(speakingResult.feedbackAudioUrl);
+        if (oldKey) {
+          await deleteFromR2(oldKey);
+        }
+      } catch (err) {
+        console.error('Failed to delete old feedback audio from R2:', err);
+      }
+    }
+
+    const path = require('path');
+    const ext = path.extname(file.originalname) || '.webm';
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    const r2FileName = `feedback-${resultId}-${uniqueSuffix}${ext}`;
+    feedbackAudioUrl = await uploadToR2(file.buffer, r2FileName, file.mimetype);
+  }
+
+  // 5. Update the DB record
+  const updatedResult = await prisma.speakingResult.update({
+    where: { id: resultId },
+    data: {
+      teacherFeedback: teacherFeedback !== undefined ? teacherFeedback : speakingResult.teacherFeedback,
+      feedbackAudioUrl
+    }
+  });
+
+  return {
+    id: updatedResult.id,
+    teacherFeedback: updatedResult.teacherFeedback,
+    feedbackAudioUrl: updatedResult.feedbackAudioUrl
+  };
+};
+
+module.exports = { getTeacherScores, getStudentDetails, updateSpeakingFeedback };

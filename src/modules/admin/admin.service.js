@@ -290,6 +290,99 @@ const getAuditLogs = async () => {
   });
 };
 
+// ─── STATISTICS ───
+
+const getStats = async ({ classId, exerciseId, studentId }) => {
+  const [totalClasses, totalStudents, totalExercises] = await Promise.all([
+    prisma.class.count({ where: { isDeleted: false } }),
+    prisma.user.count({ where: { role: 'STUDENT', isDeleted: false } }),
+    prisma.exercise.count({ where: { isDeleted: false } })
+  ]);
+
+  const classes = await prisma.class.findMany({
+    where: { isDeleted: false },
+    include: {
+      teacher: { select: { id: true, name: true } },
+      enrollments: { where: { isDeleted: false }, select: { id: true } },
+      exercises: { where: { isDeleted: false }, select: { id: true } }
+    }
+  });
+
+  const classIds = classes.map((c) => c.id);
+  const allScores = await prisma.score.findMany({
+    where: { exercise: { classId: { in: classIds } } },
+    select: { userId: true, score: true, exercise: { select: { classId: true } } }
+  });
+
+  const byClass = classes.map((cls) => {
+    const clsScores = allScores.filter((s) => s.exercise.classId === cls.id);
+    const avgScore = clsScores.length
+      ? Math.round(clsScores.reduce((sum, s) => sum + s.score, 0) / clsScores.length)
+      : 0;
+    return {
+      classId: cls.id,
+      className: cls.name,
+      teacherName: cls.teacher?.name || null,
+      studentCount: cls.enrollments.length,
+      exerciseCount: cls.exercises.length,
+      avgScore
+    };
+  });
+
+  const overview = {
+    totalClasses,
+    totalStudents,
+    totalExercises,
+    avgScore: allScores.length
+      ? Math.round(allScores.reduce((sum, s) => sum + s.score, 0) / allScores.length)
+      : 0
+  };
+
+  let byExercise = null;
+  if (classId) {
+    const exercises = await prisma.exercise.findMany({
+      where: { classId, isDeleted: false },
+      select: { id: true, title: true, type: true, status: true, createdAt: true }
+    });
+    const exerciseIds = exercises.map((e) => e.id);
+    const exerciseScores = await prisma.score.findMany({
+      where: { exerciseId: { in: exerciseIds } },
+      select: { exerciseId: true, score: true }
+    });
+    byExercise = exercises.map((ex) => {
+      const scores = exerciseScores.filter((s) => s.exerciseId === ex.id);
+      return {
+        exerciseId: ex.id,
+        title: ex.title,
+        type: ex.type,
+        status: ex.status,
+        submissionCount: scores.length,
+        avgScore: scores.length
+          ? Math.round(scores.reduce((sum, s) => sum + s.score, 0) / scores.length)
+          : 0
+      };
+    });
+  }
+
+  let byStudent = null;
+  if (studentId) {
+    const scores = await prisma.score.findMany({
+      where: { userId: studentId, ...(exerciseId ? { exerciseId } : {}) },
+      include: { exercise: { select: { title: true, type: true, classId: true } } },
+      orderBy: { completedAt: 'desc' }
+    });
+    byStudent = scores.map((s) => ({
+      exerciseId: s.exerciseId,
+      title: s.exercise.title,
+      type: s.exercise.type,
+      score: s.score,
+      completedAt: s.completedAt
+    }));
+  }
+
+  return { overview, byClass, byExercise, byStudent };
+};
+
 module.exports = {
   getUsers,
   createUser,
@@ -299,5 +392,6 @@ module.exports = {
   getClasses,
   createClass,
   deleteClass,
-  getAuditLogs
+  getAuditLogs,
+  getStats
 };

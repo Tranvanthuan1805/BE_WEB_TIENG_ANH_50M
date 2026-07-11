@@ -299,9 +299,10 @@ const extractFromFile = async (buffer, mimeType, filename = '') => {
   const job = (async () => {
     let result;
     if (source === 'image') {
-      // Ảnh = 1 lần gọi vision (không chia đợt được như text).
+      // Ảnh = 1 lần gọi vision (không chia đợt được như text). Vision model phân loại
+      // trực tiếp, KHÔNG có bước "raw text" trung gian → rawText = null (không bôi chọn được).
       const { data: raw, model } = await callWithFallback(visionMessages(buffer, mimeType));
-      result = { model, source, cached: false, chunks: 1, failedChunks: 0, data: normalize(raw) };
+      result = { model, source, cached: false, chunks: 1, failedChunks: 0, data: normalize(raw), rawText: null };
     } else {
       const text = source === 'docx' ? await extractDocxText(buffer) : await extractPdfText(buffer);
       if (!text || text.replace(/\s/g, '').length < 5) {
@@ -311,7 +312,8 @@ const extractFromFile = async (buffer, mimeType, filename = '') => {
       }
       // Word/PDF dài → chia ĐỢT, gọi song song, gộp hết.
       const { data, model, chunks, failedChunks } = await runTextExtraction(text);
-      result = { model, source, cached: false, chunks, failedChunks, data };
+      // Giữ lại text gốc (trước khi AI phân loại) để GV bôi chọn & gán tay ở FE.
+      result = { model, source, cached: false, chunks, failedChunks, data, rawText: text.slice(0, 20000) };
     }
     setCache(hash, result);
     return result;
@@ -337,7 +339,7 @@ const extractFromText = async (text) => {
     throw e;
   }
   const { data, model, chunks, failedChunks } = await runTextExtraction(clean);
-  return { model, source: 'text', cached: false, chunks, failedChunks, data };
+  return { model, source: 'text', cached: false, chunks, failedChunks, data, rawText: clean.slice(0, 20000) };
 };
 
 module.exports = {

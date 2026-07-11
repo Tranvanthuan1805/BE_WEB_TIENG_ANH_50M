@@ -156,15 +156,17 @@ model Score {
 }
 
 model SpeakingResult {
-  id         String   @id @default(auto()) @map("_id") @db.ObjectId
-  userId     String   @db.ObjectId
-  exerciseId String   @db.ObjectId
-  user       User     @relation(fields: [userId], references: [id])
-  exercise   Exercise @relation(fields: [exerciseId], references: [id])
-  audioUrl   String
-  aiScore    Float?
-  feedback   String?
-  createdAt  DateTime @default(now())
+  id               String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId           String   @db.ObjectId
+  exerciseId       String   @db.ObjectId
+  user             User     @relation(fields: [userId], references: [id])
+  exercise         Exercise @relation(fields: [exerciseId], references: [id])
+  audioUrl         String?
+  aiScore          Float?
+  feedback         String?
+  teacherFeedback  String?
+  feedbackAudioUrl String?
+  createdAt        DateTime @default(now())
 }
 
 model Gamification {
