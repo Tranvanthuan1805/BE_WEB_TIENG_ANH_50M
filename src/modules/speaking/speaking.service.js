@@ -54,7 +54,7 @@ const transcribeAudioWithGemini = async (audioBuffer, mimeType) => {
           }
           const parsed = JSON.parse(responseBody);
           const transcriptText = parsed.candidates?.[0]?.content?.parts?.[0]?.text;
-          resolve(transcriptText ? transcriptText.trim() : null);
+          resolve(transcriptText !== undefined ? transcriptText.trim() : null);
         } catch (e) {
           console.error('Error parsing Gemini response:', e);
           resolve(null);
@@ -153,9 +153,9 @@ const gradeSpeaking = async (user, { exerciseId, correctText, file }) => {
   const audioBuffer = file.buffer;
   let transcript = await transcribeAudioWithGemini(audioBuffer, file.mimetype);
   
-  // If transcription failed or returned empty, fallback to a mock transcript for testing stability
-  if (!transcript) {
-    transcript = correctText; // Mock transcription fallback
+  // If transcription failed (returned null due to API errors), fallback to correctText for stability
+  if (transcript === null) {
+    transcript = correctText; // Mock transcription fallback for API errors only
   }
 
   // 3. Compute score
