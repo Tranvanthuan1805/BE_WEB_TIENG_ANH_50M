@@ -32,7 +32,7 @@ const createTokenPair = async (user) => {
 };
 
 // ─── REGISTER ───
-const register = async ({ name, email, password, phone }) => {
+const register = async ({ name, email, password, phone, role }) => {
   // Check if email already exists
   const existingUser = await prisma.user.findUnique({
     where: { email: email.toLowerCase() },
@@ -46,6 +46,15 @@ const register = async ({ name, email, password, phone }) => {
   // Hash password
   const hashedPassword = await bcrypt.hash(password, BCRYPT_ROUNDS);
 
+  // Determine role, default to TEACHER
+  const targetRole = (role && (role.toUpperCase() === 'TEACHER' || role.toUpperCase() === 'STUDENT')) ? role.toUpperCase() : 'TEACHER';
+
+  // Generate studentCode if registering as STUDENT
+  let studentCode = null;
+  if (targetRole === 'STUDENT') {
+    studentCode = 'HS' + Math.floor(100000 + Math.random() * 900000);
+  }
+
   // Create user
   const user = await prisma.user.create({
     data: {
@@ -54,7 +63,8 @@ const register = async ({ name, email, password, phone }) => {
       password: hashedPassword,
       phone: phone || null,
       provider: 'LOCAL',
-      role: 'TEACHER',
+      role: targetRole,
+      studentCode,
     },
   });
 

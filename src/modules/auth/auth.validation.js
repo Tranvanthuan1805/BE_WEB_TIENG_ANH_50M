@@ -36,6 +36,13 @@ const registerSchema = Joi.object({
     .messages({
       'string.pattern.base': 'Số điện thoại phải từ 10–15 chữ số',
     }),
+  role: Joi.string()
+    .valid('TEACHER', 'STUDENT')
+    .optional()
+    .default('TEACHER')
+    .messages({
+      'any.only': 'Vai trò không hợp lệ',
+    }),
 });
 
 /**
