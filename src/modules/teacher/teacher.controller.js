@@ -42,4 +42,14 @@ const updateSpeakingFeedback = async (req, res, next) => {
   }
 };
 
-module.exports = { getScores, getStudentDetails, updateSpeakingFeedback };
+const getExerciseScores = async (req, res, next) => {
+  try {
+    const { exerciseId } = req.params;
+    const data = await service.getExerciseScores(req.user, exerciseId);
+    ok(res, data);
+  } catch (err) {
+    next(err);
+  }
+};
+
+module.exports = { getScores, getStudentDetails, updateSpeakingFeedback, getExerciseScores };

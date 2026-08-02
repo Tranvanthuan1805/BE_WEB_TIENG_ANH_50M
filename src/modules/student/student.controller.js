@@ -33,8 +33,28 @@ const getExerciseDetail = async (req, res, next) => {
 const submitExerciseScore = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { score } = req.body;
-    const data = await service.submitExerciseScore(req.user, id, { score });
+    const { score, wrongQuestions } = req.body;
+    const data = await service.submitExerciseScore(req.user, id, { score, wrongQuestions });
+    ok(res, data);
+  } catch (err) {
+    next(err);
+  }
+};
+
+const generateSong = async (req, res, next) => {
+  try {
+    const { prompt } = req.body;
+    const data = await service.generateSong(req.user, { prompt });
+    ok(res, data);
+  } catch (err) {
+    next(err);
+  }
+};
+
+const generateSkillPractice = async (req, res, next) => {
+  try {
+    const { skill, topic, studentInput, level } = req.body;
+    const data = await service.generateSkillPractice(req.user, { skill, topic, studentInput, level });
     ok(res, data);
   } catch (err) {
     next(err);
@@ -45,5 +65,7 @@ module.exports = {
   getScores,
   getExercises,
   getExerciseDetail,
-  submitExerciseScore
+  submitExerciseScore,
+  generateSong,
+  generateSkillPractice
 };

@@ -127,7 +127,6 @@ const getTeacherScores = async (user, { classId, period }) => {
 };
 
 const getStudentDetails = async (user, { studentId, period }) => {
-  // Query speaking results for this specific student
   const filterDate = new Date();
   if (period === 'day') {
     filterDate.setHours(0, 0, 0, 0);
@@ -137,6 +136,7 @@ const getStudentDetails = async (user, { studentId, period }) => {
     filterDate.setDate(filterDate.getDate() - 30);
   }
 
+  // 1. Fetch speaking results
   const results = await prisma.speakingResult.findMany({
     where: {
       userId: studentId,
@@ -154,12 +154,31 @@ const getStudentDetails = async (user, { studentId, period }) => {
     }
   });
 
-  return results.map(r => ({
+  // 2. Fetch general scores (Vocab, Pattern, Quiz)
+  const scores = await prisma.score.findMany({
+    where: {
+      userId: studentId,
+      completedAt: { gte: filterDate }
+    },
+    include: {
+      exercise: {
+        include: {
+          class: true
+        }
+      }
+    },
+    orderBy: {
+      completedAt: 'desc'
+    }
+  });
+
+  // 3. Map both results
+  const resultsMapped = results.map(r => ({
     id: r.id,
     exerciseId: r.exercise.id,
     title: r.exercise.title,
     type: r.exercise.type,
-    className: r.exercise.class.name,
+    className: r.exercise.class?.name || '—',
     score: r.aiScore,
     audioUrl: r.audioUrl,
     feedback: r.feedback,
@@ -167,6 +186,24 @@ const getStudentDetails = async (user, { studentId, period }) => {
     feedbackAudioUrl: r.feedbackAudioUrl,
     completedAt: r.createdAt
   }));
+
+  const scoresMapped = scores.map(s => ({
+    id: s.id,
+    exerciseId: s.exercise.id,
+    title: s.exercise.title,
+    type: s.exercise.type,
+    className: s.exercise.class?.name || '—',
+    score: s.score,
+    wrongQuestions: s.wrongQuestions || null,
+    completedAt: s.completedAt
+  }));
+
+  // Merge and sort desc
+  const allSubmissions = [...resultsMapped, ...scoresMapped].sort(
+    (a, b) => new Date(b.completedAt) - new Date(a.completedAt)
+  );
+
+  return allSubmissions;
 };
 
 const updateSpeakingFeedback = async (user, resultId, { teacherFeedback, deleteAudio, file }) => {
@@ -247,4 +284,87 @@ const updateSpeakingFeedback = async (user, resultId, { teacherFeedback, deleteA
   };
 };
 
-module.exports = { getTeacherScores, getStudentDetails, updateSpeakingFeedback };
+const getExerciseScores = async (user, exerciseId) => {
+  // 1. Fetch exercise
+  const exercise = await prisma.exercise.findFirst({
+    where: { id: exerciseId, isDeleted: false },
+    include: { class: true }
+  });
+
+  if (!exercise) {
+    const err = new Error('Không tìm thấy bài tập.');
+    err.status = 404;
+    throw err;
+  }
+
+  // 2. Verify class belongs to teacher
+  if (exercise.class.teacherId !== user.id) {
+    const err = new Error('Bạn không có quyền truy cập bài tập này.');
+    err.status = 403;
+    throw err;
+  }
+
+  // 3. Get enrolled students in class
+  const enrollments = await prisma.classEnrollment.findMany({
+    where: { classId: exercise.classId, isDeleted: false },
+    include: {
+      user: {
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          studentCode: true
+        }
+      }
+    }
+  });
+  const students = enrollments.map(e => e.user);
+  const studentIds = students.map(s => s.id);
+
+  // 4. Query scores for this exercise
+  const scores = await prisma.score.findMany({
+    where: { exerciseId, userId: { in: studentIds } }
+  });
+
+  // 5. Query speaking results for this exercise
+  const speakingResults = await prisma.speakingResult.findMany({
+    where: { exerciseId, userId: { in: studentIds } }
+  });
+
+  // 6. Map each student to their completion data
+  const studentsList = students.map(s => {
+    const scoreRec = scores.find(sc => sc.userId === s.id);
+    const speakRec = speakingResults.find(sr => sr.userId === s.id);
+
+    return {
+      id: s.id,
+      name: s.name,
+      studentCode: s.studentCode || '',
+      completed: !!(scoreRec || speakRec),
+      completedAt: scoreRec?.completedAt || speakRec?.createdAt || null,
+      score: scoreRec ? scoreRec.score : (speakRec ? speakRec.aiScore : null),
+      wrongQuestions: scoreRec ? scoreRec.wrongQuestions : null,
+      speakingResult: speakRec ? {
+        id: speakRec.id,
+        audioUrl: speakRec.audioUrl,
+        aiScore: speakRec.aiScore,
+        feedback: speakRec.feedback,
+        teacherFeedback: speakRec.teacherFeedback,
+        feedbackAudioUrl: speakRec.feedbackAudioUrl,
+      } : null
+    };
+  });
+
+  return {
+    exercise: {
+      id: exercise.id,
+      title: exercise.title,
+      type: exercise.type,
+      className: exercise.class.name,
+      classCode: exercise.class.classCode
+    },
+    students: studentsList
+  };
+};
+
+module.exports = { getTeacherScores, getStudentDetails, updateSpeakingFeedback, getExerciseScores };

@@ -28,8 +28,8 @@ module.exports = {
   openrouterApiKey: process.env.OPENROUTER_API_KEY,
   openrouterBaseUrl: process.env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1',
   // Primary model + ordered fallbacks (tried on 429/5xx).
-  ocrModel: process.env.OCR_MODEL || 'gemini-2.5-flash-lite',
-  ocrFallbackModels: (process.env.OCR_FALLBACK_MODELS || 'gemini-2.5-flash,gemini-2.0-flash')
+  ocrModel: process.env.OCR_MODEL || 'gemini-flash-latest',
+  ocrFallbackModels: (process.env.OCR_FALLBACK_MODELS || 'gemini-flash-lite-latest,gemini-pro-latest')
     .split(',')
     .map((m) => m.trim())
     .filter(Boolean),

@@ -12,6 +12,7 @@ const upload = multer({
 
 router.get('/scores', auth, requireRole('TEACHER'), controller.getScores);
 router.get('/scores/student/:studentId', auth, requireRole('TEACHER'), controller.getStudentDetails);
+router.get('/scores/exercise/:exerciseId', auth, requireRole('TEACHER'), controller.getExerciseScores);
 router.put('/scores/speaking-result/:resultId', auth, requireRole('TEACHER'), upload.single('file'), controller.updateSpeakingFeedback);
 
 module.exports = router;

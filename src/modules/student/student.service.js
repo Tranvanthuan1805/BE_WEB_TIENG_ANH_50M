@@ -1,5 +1,17 @@
 const prisma = require('../../config/database');
 const gamesService = require('../ocr/games.service');
+const OpenAI = require('openai');
+const env = require('../../config/env');
+const https = require('https');
+
+const agent = env.ocrInsecureTls ? new https.Agent({ rejectUnauthorized: false }) : undefined;
+const buildAIClient = () => {
+  if (env.ocrProvider === 'openrouter') {
+    return new OpenAI({ apiKey: env.openrouterApiKey, baseURL: env.openrouterBaseUrl, httpAgent: agent, maxRetries: 0 });
+  }
+  return new OpenAI({ apiKey: env.geminiApiKey, baseURL: env.geminiBaseUrl, httpAgent: agent, maxRetries: 0 });
+};
+const aiClient = buildAIClient();
 
 const getStudentScores = async (user, { period }) => {
   const filterDate = new Date();
@@ -162,7 +174,7 @@ const getStudentExercises = async (user) => {
   const scores = await prisma.score.findMany({
     where: { userId: user.id }
   });
-  const scoreMap = Object.fromEntries(scores.map(s => [s.exerciseId, s.score]));
+  const scoreMap = Object.fromEntries(scores.map(s => [s.exerciseId, { score: s.score, wrongQuestions: s.wrongQuestions }]));
 
   return exercises.map(ex => ({
     id: ex.id,
@@ -172,7 +184,8 @@ const getStudentExercises = async (user) => {
     className: ex.class?.name || '—',
     classCode: ex.class?.classCode || '',
     counts: ex.gameConfig?.counts || { vocab: 0, sentence: 0, question: 0 },
-    score: scoreMap[ex.id] ?? null,
+    score: scoreMap[ex.id]?.score ?? null,
+    wrongQuestions: scoreMap[ex.id]?.wrongQuestions ?? null,
     completed: scoreMap[ex.id] !== undefined,
     createdAt: ex.createdAt
   }));
@@ -232,7 +245,7 @@ const getStudentExerciseDetail = async (user, id) => {
   };
 };
 
-const submitExerciseScore = async (user, exerciseId, { score }) => {
+const submitExerciseScore = async (user, exerciseId, { score, wrongQuestions }) => {
   if (score === undefined || score === null) {
     const err = new Error('Thiếu điểm số.');
     err.status = 400;
@@ -267,16 +280,22 @@ const submitExerciseScore = async (user, exerciseId, { score }) => {
       data: {
         userId: user.id,
         exerciseId,
-        score: Number(score)
+        score: Number(score),
+        wrongQuestions: wrongQuestions || null
       }
     });
-  } else if (Number(score) > existingScore.score) {
+  } else {
+    const updateData = {};
+    if (Number(score) > existingScore.score) {
+      updateData.score = Number(score);
+    }
+    if (wrongQuestions !== undefined) {
+      updateData.wrongQuestions = wrongQuestions;
+    }
     savedScore = await prisma.score.update({
       where: { id: existingScore.id },
-      data: { score: Number(score) }
+      data: updateData
     });
-  } else {
-    savedScore = existingScore;
   }
 
   const earnedStars = Number(score) >= 80 ? 3 : Number(score) >= 50 ? 2 : 1;
@@ -331,9 +350,178 @@ const submitExerciseScore = async (user, exerciseId, { score }) => {
   };
 };
 
+const generateSong = async (user, { prompt }) => {
+  if (!prompt) {
+    const err = new Error('Thiếu chủ đề hoặc từ vựng tạo bài hát.');
+    err.status = 400;
+    throw err;
+  }
+
+  const modelName = env.ocrModel || 'gemini-flash-latest';
+  
+  const response = await aiClient.chat.completions.create({
+    model: modelName,
+    messages: [
+      {
+        role: 'system',
+        content: `You are an AI children's songwriter and English teacher. Create a simple, short, fun and catchy English learning song based on the user's topic or vocabulary list.
+Ensure the language is suitable for young students (elementary to middle school).
+Provide the output EXACTLY in JSON format with no markdown wrappers or extra text.
+JSON Structure:
+{
+  "title": "Song Title",
+  "verses": [
+    {
+      "heading": "Verse 1 / Chorus / Verse 2",
+      "lines": [
+        { "en": "English line here", "vi": "Vietnamese translation of the line" }
+      ]
+    }
+  ]
+}`
+      },
+      {
+        role: 'user',
+        content: `Topic / vocabulary: ${prompt}`
+      }
+    ],
+    response_format: { type: 'json_object' }
+  });
+
+  const contentText = response.choices[0].message.content;
+  try {
+    return JSON.parse(contentText);
+  } catch (err) {
+    console.error('Failed to parse AI song JSON:', contentText);
+    return {
+      title: 'Song about ' + prompt,
+      verses: [
+        {
+          heading: 'Lời bài hát',
+          lines: [
+            { "en": "Let's learn English together!", "vi": "Hãy cùng học tiếng Anh nhé!" },
+            { "en": "Sing a song for " + prompt, "vi": "Hát một bài hát về " + prompt }
+          ]
+        }
+      ]
+    };
+  }
+};
+
+const generateSkillPractice = async (user, { skill, topic = 'daily life', studentInput = '', level = 'A2' }) => {
+  const modelName = env.ocrModel || 'gemini-flash-latest';
+  
+  let systemPrompt = '';
+  let userPrompt = '';
+
+  if (skill === 'listening') {
+    systemPrompt = `You are an expert English Listening AI Teacher. Generate an engaging listening practice exercise suitable for level ${level} students.
+Return EXACTLY a JSON object with no markdown fences:
+{
+  "title": "Topic title",
+  "script": "Full audio script/dialogue in English",
+  "vietnameseTranslation": "Full Vietnamese translation",
+  "questions": [
+    {
+      "id": 1,
+      "question": "Question in English?",
+      "options": ["A. Option 1", "B. Option 2", "C. Option 3", "D. Option 4"],
+      "answer": 0,
+      "explanation": "Explanation in Vietnamese"
+    }
+  ]
+}`;
+    userPrompt = `Generate a listening exercise about: ${topic}`;
+  } else if (skill === 'speaking') {
+    systemPrompt = `You are an expert English Speaking & Pronunciation Evaluator AI.
+Evaluate the student's spoken/recorded English response for topic: "${topic}".
+Student Spoken Input: "${studentInput}"
+Return EXACTLY a JSON object with no markdown fences:
+{
+  "overallScore": 92,
+  "pronunciationScore": 90,
+  "fluencyScore": 95,
+  "accuracyScore": 90,
+  "feedback": "Detailed encouraging feedback in Vietnamese from Mascot AI",
+  "goodPoints": ["Highlight 1", "Highlight 2"],
+  "improvements": ["Suggestion 1", "Suggestion 2"],
+  "improvedPhrase": "Better native sentence way to say it"
+}`;
+    userPrompt = `Evaluate student speaking for topic "${topic}": ${studentInput}`;
+  } else if (skill === 'reading') {
+    systemPrompt = `You are an expert English Reading AI Teacher. Create a short, interesting reading passage for level ${level} students about "${topic}".
+Return EXACTLY a JSON object with no markdown fences:
+{
+  "title": "Passage Title",
+  "passage": "Full English passage text (100-150 words)",
+  "vocabulary": [
+    { "word": "example", "ipa": "/ɪɡˈzɑːm.pəl/", "meaning": "ví dụ" }
+  ],
+  "questions": [
+    {
+      "id": 1,
+      "question": "Reading question?",
+      "options": ["Option A", "Option B", "Option C", "Option D"],
+      "answer": 0,
+      "explanation": "Giải thích chi tiết"
+    }
+  ]
+}`;
+    userPrompt = `Create a reading passage about: ${topic}`;
+  } else if (skill === 'writing') {
+    systemPrompt = `You are an expert English Writing AI Teacher & Examiner.
+Evaluate the student's writing submission for topic: "${topic}".
+Student Text: "${studentInput}"
+Return EXACTLY a JSON object with no markdown fences:
+{
+  "score": 88,
+  "grammarRating": "A",
+  "vocabularyRating": "B+",
+  "feedback": "Nhận xét chi tiết bằng tiếng Việt giúp học sinh tiến bộ",
+  "grammarErrors": [
+    { "original": "mistake word", "correction": "corrected word", "reason": "Lý do sửa" }
+  ],
+  "perfectRewrite": "A polished, natural native-like rewrite of the student paragraph."
+}`;
+    userPrompt = `Evaluate writing topic "${topic}": ${studentInput}`;
+  }
+
+  const modelsToTry = [env.ocrModel, ...env.ocrFallbackModels].filter(Boolean);
+  let lastErr = null;
+
+  for (const m of modelsToTry) {
+    try {
+      const response = await aiClient.chat.completions.create({
+        model: m,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt }
+        ],
+        response_format: { type: 'json_object' }
+      });
+
+      const contentText = response.choices[0].message.content;
+      try {
+        return JSON.parse(contentText);
+      } catch (err) {
+        // Handle case where AI wraps JSON in ```json ```
+        const cleaned = contentText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+        return JSON.parse(cleaned);
+      }
+    } catch (err) {
+      console.warn(`Model ${m} failed for skill practice, trying fallback...`, err.message);
+      lastErr = err;
+    }
+  }
+
+  throw lastErr || new Error('Không thể kết nối dịch vụ AI. Vui lòng thử lại sau!');
+};
+
 module.exports = { 
   getStudentScores,
   getStudentExercises,
   getStudentExerciseDetail,
-  submitExerciseScore
+  submitExerciseScore,
+  generateSong,
+  generateSkillPractice
 };

@@ -7,5 +7,7 @@ router.get('/scores', auth, requireRole('STUDENT'), controller.getScores);
 router.get('/exercises', auth, requireRole('STUDENT'), controller.getExercises);
 router.get('/exercises/:id', auth, requireRole('STUDENT'), controller.getExerciseDetail);
 router.post('/exercises/:id/submit', auth, requireRole('STUDENT'), controller.submitExerciseScore);
+router.post('/generate-song', auth, requireRole('STUDENT'), controller.generateSong);
+router.post('/ai-practice', auth, requireRole('STUDENT'), controller.generateSkillPractice);
 
 module.exports = router;
