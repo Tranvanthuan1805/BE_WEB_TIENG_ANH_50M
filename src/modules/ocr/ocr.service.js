@@ -109,17 +109,83 @@ const is5xx = (err) => {
   return s >= 500 && s < 600;
 };
 
-/** Một lần gọi model (text hoặc vision tùy messages). Có timeout. */
-const callModel = async (model, messages) => {
+// ── Gemini REST API Client ──
+const callGeminiNative = (apiKey, model, textPrompt, imageBuffer, mimeType) => {
+  return new Promise((resolve, reject) => {
+    const parts = [];
+    if (textPrompt) parts.push({ text: textPrompt });
+    if (imageBuffer) {
+      parts.push({
+        inlineData: {
+          mimeType: mimeType || 'image/png',
+          data: imageBuffer.toString('base64'),
+        },
+      });
+    }
+
+    const postData = JSON.stringify({
+      contents: [{ parts }],
+      generationConfig: {
+        responseMimeType: 'application/json',
+        temperature: 0.1,
+      },
+    });
+
+    const modelClean = (model || 'gemini-flash-latest').replace(/^models\//, '');
+    const options = {
+      hostname: 'generativelanguage.googleapis.com',
+      path: `/v1beta/models/${modelClean}:generateContent?key=${apiKey}`,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(postData),
+      },
+      agent,
+    };
+
+    const req = https.request(options, (res) => {
+      let body = '';
+      res.on('data', (chunk) => (body += chunk));
+      res.on('end', () => {
+        if (res.statusCode !== 200) {
+          const err = new Error(`Gemini API Error ${res.statusCode}: ${body}`);
+          err.status = res.statusCode;
+          return reject(err);
+        }
+        try {
+          const parsed = JSON.parse(body);
+          const rawText = parsed.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
+          resolve(JSON.parse(rawText));
+        } catch (e) {
+          reject(e);
+        }
+      });
+    });
+
+    req.on('error', reject);
+    req.write(postData);
+    req.end();
+  });
+};
+
+/** Một lần gọi model (text hoặc vision). */
+const callModel = async (model, messages, imageBuffer = null, mimeType = null) => {
+  const apiKey = env.geminiApiKey || process.env.GEMINI_API_KEY;
+  if (apiKey && env.ocrProvider !== 'openrouter') {
+    const userPrompt = typeof messages === 'string' 
+      ? messages 
+      : (Array.isArray(messages) ? (messages[1]?.content?.[0]?.text || messages[1]?.content || SYSTEM_PROMPT) : SYSTEM_PROMPT);
+    const fullPrompt = `${SYSTEM_PROMPT}\n\nINPUT:\n${userPrompt}`;
+    return await callGeminiNative(apiKey, model, fullPrompt, imageBuffer, mimeType);
+  }
+
   const params = {
     model,
     messages,
     response_format: { type: 'json_object' },
     temperature: 0.1,
-    max_tokens: 8192, // đủ cho output JSON 1 đợt (~5k ký tự input) → tránh JSON bị cắt
+    max_tokens: 8192,
   };
-  // Tắt "thinking" của Gemini 2.5 để nhanh hơn (chỉ áp dụng khi có cấu hình).
-  if (env.ocrReasoningEffort) params.reasoning_effort = env.ocrReasoningEffort;
 
   const completion = await llm.chat.completions.create(params, { timeout: env.ocrCallTimeoutMs });
   const content = completion.choices?.[0]?.message?.content || '{}';
@@ -127,24 +193,25 @@ const callModel = async (model, messages) => {
 };
 
 /**
- * Thử model chính → fallback theo thứ tự. Bỏ qua model đang cooldown.
- * 429/5xx: đổi model NGAY (không backoff). Hết model → ném lỗi cuối.
+ * Thử model chính → fallback theo thứ tự.
  */
-const callWithFallback = async (messages) => {
-  const chain = [env.ocrModel, ...env.ocrFallbackModels].filter((m, i, a) => m && a.indexOf(m) === i);
+const callWithFallback = async (messages, imageBuffer = null, mimeType = null) => {
+  const chain = ['gemini-flash-latest', 'gemini-3.5-flash', 'gemini-3.6-flash', env.ocrModel, ...env.ocrFallbackModels]
+    .filter((m, i, a) => m && a.indexOf(m) === i);
   const ready = chain.filter((m) => !isCoolingDown(m));
-  const order = ready.length ? ready : chain; // tất cả đang nghỉ → vẫn thử theo thứ tự
+  const order = ready.length ? ready : chain;
 
   let lastErr;
   for (const model of order) {
     try {
-      const data = await scheduler.schedule(() => callModel(model, messages));
+      const data = await scheduler.schedule(() => callModel(model, messages, imageBuffer, mimeType));
       return { data, model };
     } catch (err) {
       lastErr = err;
       if (is429(err)) { markCooldown(model); continue; }
       if (is5xx(err)) continue;
-      throw err; // lỗi không phải tạm thời (vd JSON hỏng, 4xx khác) → dừng
+      // Tránh crash nếu 1 model đổi tên → thử tiếp model khác
+      continue;
     }
   }
   throw lastErr || new Error('OCR_ALL_MODELS_FAILED');
@@ -301,7 +368,7 @@ const extractFromFile = async (buffer, mimeType, filename = '') => {
     if (source === 'image') {
       // Ảnh = 1 lần gọi vision (không chia đợt được như text). Vision model phân loại
       // trực tiếp, KHÔNG có bước "raw text" trung gian → rawText = null (không bôi chọn được).
-      const { data: raw, model } = await callWithFallback(visionMessages(buffer, mimeType));
+      const { data: raw, model } = await callWithFallback(visionMessages(buffer, mimeType), buffer, mimeType);
       result = { model, source, cached: false, chunks: 1, failedChunks: 0, data: normalize(raw), rawText: null };
     } else {
       const text = source === 'docx' ? await extractDocxText(buffer) : await extractPdfText(buffer);
