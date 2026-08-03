@@ -148,28 +148,55 @@ const getStudentExercises = async (user) => {
   });
   const classIds = enrollments.map(e => e.classId);
 
-  const exercises = await prisma.exercise.findMany({
-    where: {
-      classId: { in: classIds },
-      status: 'PUBLISHED',
-      isDeleted: false
-    },
-    orderBy: { createdAt: 'desc' },
-    select: {
-      id: true,
-      title: true,
-      type: true,
-      classId: true,
-      gameConfig: true,
-      createdAt: true,
-      class: {
-        select: {
-          name: true,
-          classCode: true
+  let exercises = [];
+  if (classIds.length > 0) {
+    exercises = await prisma.exercise.findMany({
+      where: {
+        classId: { in: classIds },
+        status: 'PUBLISHED',
+        isDeleted: false
+      },
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        title: true,
+        type: true,
+        classId: true,
+        gameConfig: true,
+        createdAt: true,
+        class: {
+          select: {
+            name: true,
+            classCode: true
+          }
         }
       }
-    }
-  });
+    });
+  }
+
+  if (exercises.length === 0) {
+    exercises = await prisma.exercise.findMany({
+      where: {
+        status: 'PUBLISHED',
+        isDeleted: false
+      },
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        title: true,
+        type: true,
+        classId: true,
+        gameConfig: true,
+        createdAt: true,
+        class: {
+          select: {
+            name: true,
+            classCode: true
+          }
+        }
+      }
+    });
+  }
 
   const scores = await prisma.score.findMany({
     where: { userId: user.id }
