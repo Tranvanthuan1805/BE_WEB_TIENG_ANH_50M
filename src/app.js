@@ -52,6 +52,7 @@ app.use('/api/admin', require('./modules/admin/admin.routes'));
 app.use('/api/ranking', require('./modules/ranking/ranking.routes'));
 app.use('/api/teacher', require('./modules/teacher/teacher.routes'));
 app.use('/api/student', require('./modules/student/student.routes'));
+app.use('/api/ai', require('./modules/ai/ai.routes'));
 
 // ── Error Handler (must be last) ──
 app.use(errorHandler);
