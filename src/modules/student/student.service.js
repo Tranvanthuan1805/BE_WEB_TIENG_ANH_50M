@@ -211,6 +211,12 @@ const getStudentExercises = async (user) => {
     className: ex.class?.name || '—',
     classCode: ex.class?.classCode || '',
     counts: ex.gameConfig?.counts || { vocab: 0, sentence: 0, question: 0 },
+    supportLinks: ex.gameConfig?.supportLinks || {
+      youtube: ex.gameConfig?.youtubeUrl || null,
+      ebook: ex.gameConfig?.ebookUrl || null,
+      website: ex.gameConfig?.websiteUrl || null,
+      audio: ex.gameConfig?.audioUrl || null
+    },
     score: scoreMap[ex.id]?.score ?? null,
     wrongQuestions: scoreMap[ex.id]?.wrongQuestions ?? null,
     completed: scoreMap[ex.id] !== undefined,

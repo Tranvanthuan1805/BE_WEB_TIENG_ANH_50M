@@ -24,7 +24,7 @@ const decideType = ({ vocab, sentence, question }) => {
 
 // ── Giao bài: lưu 1 Exercise (PUBLISHED) cho lớp ──
 const create = async (user, body) => {
-  const { classId, vocabText = '', sentenceText = '', mcqText = '' } = body;
+  const { classId, vocabText = '', sentenceText = '', mcqText = '', supportLinks = {} } = body;
   const title = String(body.title || '').trim();
   const cls = await getOwnedClass(user, classId);
   if (!title) { const e = new Error('Tên bài tập không được để trống.'); e.status = 400; throw e; }
@@ -47,7 +47,20 @@ const create = async (user, body) => {
       title,
       type: decideType(counts),
       status: 'PUBLISHED',
-      gameConfig: { vocabText, sentenceText, mcqText, counts, games: gamesResult, gamesMeta },
+      gameConfig: { 
+        vocabText, 
+        sentenceText, 
+        mcqText, 
+        counts, 
+        games: gamesResult, 
+        gamesMeta,
+        supportLinks: {
+          youtube: supportLinks.youtube || null,
+          ebook: supportLinks.ebook || null,
+          website: supportLinks.website || null,
+          audio: supportLinks.audio || null
+        }
+      },
     },
   });
 
