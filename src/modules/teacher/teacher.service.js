@@ -97,15 +97,32 @@ const getTeacherScores = async (user, { classId, period }) => {
     speaking: typeSumCount.SPEAKING.count ? Math.round(typeSumCount.SPEAKING.sum / typeSumCount.SPEAKING.count) : 0
   };
 
-  const byStudent = Object.values(studentStats).map(s => ({
-    userId: s.userId,
-    name: s.name,
-    vocab: s.vocab ? Math.round(s.vocab.sum / s.vocab.count) : 0,
-    sentence: s.sentence ? Math.round(s.sentence.sum / s.sentence.count) : 0,
-    quiz: s.quiz ? Math.round(s.quiz.sum / s.quiz.count) : 0,
-    speaking: s.speaking ? Math.round(s.speaking.sum / s.speaking.count) : 0,
-    total: s.count ? Math.round(s.total / s.count) : 0
-  }));
+  const byStudent = Object.values(studentStats).map(s => {
+    const vocab = s.vocab ? Math.round(s.vocab.sum / s.vocab.count) : 0;
+    const sentence = s.sentence ? Math.round(s.sentence.sum / s.sentence.count) : 0;
+    const quiz = s.quiz ? Math.round(s.quiz.sum / s.quiz.count) : 0;
+    const speaking = s.speaking ? Math.round(s.speaking.sum / s.speaking.count) : 0;
+    const total = s.count ? Math.round(s.total / s.count) : 0;
+
+    // 4 Skills aggregated from 6 exercise question types (Listening, Speaking, Reading, Writing)
+    const fourSkills = {
+      listening: Math.round(sentence * 0.4 + vocab * 0.3 + quiz * 0.3),
+      speaking: Math.round(speaking * 0.85 + sentence * 0.15),
+      reading: Math.round(quiz * 0.5 + vocab * 0.3 + sentence * 0.2),
+      writing: Math.round(sentence * 0.5 + vocab * 0.3 + quiz * 0.2)
+    };
+
+    return {
+      userId: s.userId,
+      name: s.name,
+      vocab,
+      sentence,
+      quiz,
+      speaking,
+      total,
+      fourSkills
+    };
+  });
 
   // 6. Calculate trend data (Group by YYYY-MM-DD)
   const trendMap = {};
