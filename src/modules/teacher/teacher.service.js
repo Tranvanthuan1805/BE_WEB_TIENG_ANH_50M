@@ -1,6 +1,6 @@
 const prisma = require('../../config/database');
 
-const getTeacherScores = async (user, { classId, period }) => {
+const getTeacherScores = async (user, { classId, period, exerciseId }) => {
   // 1. Verify that this class exists and belongs to this teacher
   const cls = await prisma.class.findFirst({
     where: { id: classId, teacherId: user.id, isDeleted: false }
@@ -30,12 +30,17 @@ const getTeacherScores = async (user, { classId, period }) => {
   const studentIds = students.map(s => s.id);
 
   // 4. Query scores
+  const scoreWhere = {
+    userId: { in: studentIds },
+    completedAt: { gte: filterDate },
+    exercise: { classId } // ensure scores are for this class's exercises
+  };
+  if (exerciseId && exerciseId !== 'all') {
+    scoreWhere.exerciseId = exerciseId;
+  }
+
   const scores = await prisma.score.findMany({
-    where: {
-      userId: { in: studentIds },
-      completedAt: { gte: filterDate },
-      exercise: { classId } // ensure scores are for this class's exercises
-    },
+    where: scoreWhere,
     include: {
       exercise: true
     }

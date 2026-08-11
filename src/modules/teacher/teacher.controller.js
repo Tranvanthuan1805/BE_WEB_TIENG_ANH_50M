@@ -3,11 +3,11 @@ const { ok, fail } = require('../../utils/response');
 
 const getScores = async (req, res, next) => {
   try {
-    const { classId, period = 'week' } = req.query;
+    const { classId, period = 'week', exerciseId } = req.query;
     if (!classId) {
       return fail(res, 'Vui lòng cung cấp classId!', 400);
     }
-    const data = await service.getTeacherScores(req.user, { classId, period });
+    const data = await service.getTeacherScores(req.user, { classId, period, exerciseId });
     ok(res, data);
   } catch (err) {
     next(err);
