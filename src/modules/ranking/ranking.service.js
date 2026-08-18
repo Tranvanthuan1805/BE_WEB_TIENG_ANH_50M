@@ -79,12 +79,10 @@ const getLeaderboard = async ({ classId, period }) => {
   const getAvgSkill = (userId, typeKey) => {
     const data = userSkillScores[userId]?.[typeKey];
     if (!data || data.count === 0) {
-      // Deterministic fallback based on userId hash so it doesn't show 0 in demo
-      const charCodeSum = userId.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
-      const skillOffset = typeKey.charCodeAt(0) % 15;
-      return 70 + (charCodeSum % 15) + skillOffset;
+      return 0;
     }
-    return Math.round(data.sum / data.count);
+    const val = Math.round(data.sum / data.count);
+    return Math.min(100, Math.max(0, val > 100 ? Math.round(val / 100) : val));
   };
 
   const userStarsMap = {};
@@ -93,6 +91,7 @@ const getLeaderboard = async ({ classId, period }) => {
     userStarsMap[sc.userId] = (userStarsMap[sc.userId] || 0) + starsEarned;
   });
 
+  let rankings;
   if (period === 'all') {
     rankings = students.map(s => ({
       userId: s.id,
@@ -114,7 +113,7 @@ const getLeaderboard = async ({ classId, period }) => {
       name: s.name,
       avatar: s.avatarUrl || '/assets/mascot-face-avatar.png',
       totalStars: userStarsMap[s.id] || 0,
-      change: Math.floor(Math.random() * 3) - 1,
+      change: 0,
       skills: {
         vocab: getAvgSkill(s.id, 'VOCAB'),
         sentence: getAvgSkill(s.id, 'PATTERN'),
