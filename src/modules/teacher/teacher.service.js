@@ -79,6 +79,12 @@ const getTeacherScores = async (user, { classId, period, exerciseId }) => {
 
     const sStat = studentStats[sc.userId];
     if (sStat) {
+      let normScore = Number(sc.score) || 0;
+      if (normScore > 100) {
+        normScore = normScore % 100 === 0 ? Math.round(normScore / 100) : (normScore <= 10000 ? Math.round(normScore / 100) : 100);
+      }
+      normScore = Math.min(100, Math.max(0, normScore));
+
       const field = exType === 'VOCAB' ? 'vocab' :
                     exType === 'PATTERN' ? 'sentence' :
                     exType === 'QUIZ' ? 'quiz' :
@@ -87,10 +93,18 @@ const getTeacherScores = async (user, { classId, period, exerciseId }) => {
         if (sStat[field] === null) {
           sStat[field] = { sum: 0, count: 0 };
         }
-        sStat[field].sum += sc.score;
+        sStat[field].sum += normScore;
         sStat[field].count += 1;
+      } else {
+        ['vocab', 'sentence', 'quiz', 'speaking'].forEach(f => {
+          if (sStat[f] === null) {
+            sStat[f] = { sum: 0, count: 0 };
+          }
+          sStat[f].sum += normScore;
+          sStat[f].count += 1;
+        });
       }
-      sStat.total += sc.score;
+      sStat.total += normScore;
       sStat.count += 1;
     }
   });
@@ -103,18 +117,18 @@ const getTeacherScores = async (user, { classId, period, exerciseId }) => {
   };
 
   const byStudent = Object.values(studentStats).map(s => {
-    const vocab = s.vocab ? Math.round(s.vocab.sum / s.vocab.count) : 0;
-    const sentence = s.sentence ? Math.round(s.sentence.sum / s.sentence.count) : 0;
-    const quiz = s.quiz ? Math.round(s.quiz.sum / s.quiz.count) : 0;
-    const speaking = s.speaking ? Math.round(s.speaking.sum / s.speaking.count) : 0;
     const total = s.count ? Math.round(s.total / s.count) : 0;
+    const vocab = s.vocab && s.vocab.count ? Math.round(s.vocab.sum / s.vocab.count) : total;
+    const sentence = s.sentence && s.sentence.count ? Math.round(s.sentence.sum / s.sentence.count) : total;
+    const quiz = s.quiz && s.quiz.count ? Math.round(s.quiz.sum / s.quiz.count) : total;
+    const speaking = s.speaking && s.speaking.count ? Math.round(s.speaking.sum / s.speaking.count) : total;
 
     // 4 Skills aggregated from 6 exercise question types (Listening, Speaking, Reading, Writing)
     const fourSkills = {
-      listening: Math.round(sentence * 0.4 + vocab * 0.3 + quiz * 0.3),
-      speaking: Math.round(speaking * 0.85 + sentence * 0.15),
-      reading: Math.round(quiz * 0.5 + vocab * 0.3 + sentence * 0.2),
-      writing: Math.round(sentence * 0.5 + vocab * 0.3 + quiz * 0.2)
+      listening: Math.min(100, Math.round(sentence * 0.4 + vocab * 0.3 + quiz * 0.3)),
+      speaking: Math.min(100, Math.round(speaking * 0.85 + sentence * 0.15)),
+      reading: Math.min(100, Math.round(quiz * 0.5 + vocab * 0.3 + sentence * 0.2)),
+      writing: Math.min(100, Math.round(sentence * 0.5 + vocab * 0.3 + quiz * 0.2))
     };
 
     return {
