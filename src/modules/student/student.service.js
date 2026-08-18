@@ -285,6 +285,12 @@ const submitExerciseScore = async (user, exerciseId, { score, wrongQuestions }) 
     throw err;
   }
 
+  let numScore = Number(score);
+  if (numScore > 100) {
+    numScore = numScore % 100 === 0 ? Math.round(numScore / 100) : 100;
+  }
+  numScore = Math.min(100, Math.max(0, numScore));
+
   const exercise = await prisma.exercise.findFirst({
     where: { id: exerciseId, isDeleted: false }
   });
@@ -313,14 +319,14 @@ const submitExerciseScore = async (user, exerciseId, { score, wrongQuestions }) 
       data: {
         userId: user.id,
         exerciseId,
-        score: Number(score),
+        score: numScore,
         wrongQuestions: wrongQuestions || null
       }
     });
   } else {
     const updateData = {};
-    if (Number(score) > existingScore.score) {
-      updateData.score = Number(score);
+    if (numScore > existingScore.score) {
+      updateData.score = numScore;
     }
     if (wrongQuestions !== undefined) {
       updateData.wrongQuestions = wrongQuestions;
