@@ -9,8 +9,8 @@ const env = require('../../config/env');
 // Helper to evaluate audio using Gemini 1.5/2.0 Flash as Expert English Teacher for Vietnamese Learners
 const evaluateSpeakingAudioWithGemini = async (audioBuffer, rawMimeType, correctText = '') => {
   const apiKey = process.env.GEMINI_API_KEY || env.geminiApiKey;
-  if (!apiKey || !apiKey.startsWith('AIzaSy')) {
-    console.warn("No valid GEMINI_API_KEY (starts with AIzaSy) found in .env.");
+  if (!apiKey) {
+    console.warn("No GEMINI_API_KEY found in .env.");
     return null;
   }
 
