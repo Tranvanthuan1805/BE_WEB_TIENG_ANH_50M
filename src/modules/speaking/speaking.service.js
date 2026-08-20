@@ -6,7 +6,7 @@ const https = require('https');
 // Helper to transcribe audio using Gemini 2.5 Flash
 const env = require('../../config/env');
 
-// Helper to evaluate audio using Gemini 1.5 Flash with strict System Prompt
+// Helper to evaluate audio using Gemini 1.5 Flash as Expert Phonetics Examiner
 const evaluateSpeakingAudioWithGemini = async (audioBuffer, rawMimeType, correctText = '') => {
   const apiKey = process.env.GEMINI_API_KEY || env.geminiApiKey;
   if (!apiKey) {
@@ -17,23 +17,25 @@ const evaluateSpeakingAudioWithGemini = async (audioBuffer, rawMimeType, correct
   const base64Data = audioBuffer.toString('base64');
   const cleanMimeType = (rawMimeType || 'audio/webm').split(';')[0].trim();
 
-  const promptText = `You are an expert AI English pronunciation evaluator for Primary & Secondary school students.
-Target English text to pronounce: "${correctText}"
+  const promptText = `You are an elite Senior AI Phonetics & English Speech Specialist evaluating school student speech recordings.
+Target word / sentence to pronounce: "${correctText}"
 
-Evaluate the student's audio recording:
-1. Is the audio silent, background noise only, or lacking clear recognizable English speech?
-   If so, return: {"isSilent": true, "score": 0, "transcript": "", "feedback": "Không phát hiện giọng nói. Vui lòng nói rõ hơn!"}
-2. If clear spoken English is detected:
-   - Transcribe what the user said in "transcript".
-   - Evaluate pronunciation accuracy against "${correctText}" on a scale of 0 to 100 in "score".
-   - Give short feedback in Vietnamese in "feedback".
+Instructions:
+1. Examine the audio file carefully for clear human spoken speech.
+2. If audio is completely silent or only background noise:
+   Return: {"isSilent": true, "score": 0, "transcript": "", "feedback": "Không phát hiện giọng nói. Bạn hãy chọn phòng yên tĩnh, bấm micro và phát âm rõ từ nhé!"}
+3. If spoken speech is present:
+   - Transcribe exact spoken English text in "transcript".
+   - Evaluate phoneme accuracy, stress, clarity, and intonation against target "${correctText}".
+   - Provide a fair, accurate score from 0 to 100 in "score". (If student pronounced target correctly or with minor accent, score 80-100; if partially correct, score 50-79; if wrong word or un-understandable, score 0-49).
+   - Provide detailed, constructive feedback in Vietnamese in "feedback", explaining EXACTLY why they got this score (e.g. what sounds were pronounced well, which ending consonant or vowel stress needs improvement).
 
-Return ONLY valid JSON matching this schema:
+Return strictly JSON matching this structure:
 {
   "isSilent": false,
   "transcript": "bicycle",
-  "score": 90,
-  "feedback": "Phát âm rất tốt từ bicycle!"
+  "score": 95,
+  "feedback": "Tuyệt vời! Bạn phát âm từ 'bicycle' rất tròn vành, đúng trọng âm đầu /ˈbaɪsɪkl/ và chuẩn âm đuôi /kl/."
 }`;
 
   const postData = JSON.stringify({
@@ -54,7 +56,7 @@ Return ONLY valid JSON matching this schema:
     ],
     generationConfig: {
       responseMimeType: 'application/json',
-      temperature: 0.1
+      temperature: 0.2
     }
   });
 
@@ -178,7 +180,7 @@ const gradeSpeaking = async (user, { exerciseId, correctText, file }) => {
     throw err;
   }
 
-  // 2. Perform AI Evaluation via Gemini
+  // 2. Perform AI Evaluation via Gemini Expert Examiner
   const audioBuffer = file.buffer;
   const evalResult = await evaluateSpeakingAudioWithGemini(audioBuffer, file.mimetype, correctText);
 
@@ -187,7 +189,7 @@ const gradeSpeaking = async (user, { exerciseId, correctText, file }) => {
   let feedbackText = '';
 
   if (evalResult && typeof evalResult.score === 'number') {
-    if (evalResult.isSilent || evalResult.score === 0 || !evalResult.transcript) {
+    if (evalResult.isSilent) {
       score = 0;
       transcript = '';
       feedbackText = evalResult.feedback || 'Không phát hiện giọng nói. Vui lòng bấm micro và đọc lại rõ hơn!';
@@ -289,6 +291,7 @@ const gradeSpeaking = async (user, { exerciseId, correctText, file }) => {
     audioUrl: r2Url,
     transcript,
     score,
+    feedback: feedbackText,
     attempt: currentAttempt,
     canRetry,
     earnedStars
