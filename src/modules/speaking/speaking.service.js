@@ -6,7 +6,7 @@ const https = require('https');
 // Helper to transcribe audio using Gemini 2.5 Flash
 const env = require('../../config/env');
 
-// Helper to evaluate audio using Gemini 1.5 Flash as Expert Phonetics Examiner
+// Helper to evaluate audio using Gemini 1.5 Flash as Expert English Teacher for Vietnamese Learners
 const evaluateSpeakingAudioWithGemini = async (audioBuffer, rawMimeType, correctText = '') => {
   const apiKey = process.env.GEMINI_API_KEY || env.geminiApiKey;
   if (!apiKey) {
@@ -17,25 +17,26 @@ const evaluateSpeakingAudioWithGemini = async (audioBuffer, rawMimeType, correct
   const base64Data = audioBuffer.toString('base64');
   const cleanMimeType = (rawMimeType || 'audio/webm').split(';')[0].trim();
 
-  const promptText = `You are an elite Senior AI Phonetics & English Speech Specialist evaluating school student speech recordings.
-Target word / sentence to pronounce: "${correctText}"
+  const promptText = `Bạn là một giáo viên chuyên chấm phát âm tiếng Anh cho người Việt.
+Đầu vào nhận được từ file âm thanh người học đọc:
+- "reference_text": "${correctText}"
 
-Instructions:
-1. Examine the audio file carefully for clear human spoken speech.
-2. If audio is completely silent or only background noise:
-   Return: {"isSilent": true, "score": 0, "transcript": "", "feedback": "Không phát hiện giọng nói. Bạn hãy chọn phòng yên tĩnh, bấm micro và phát âm rõ từ nhé!"}
-3. If spoken speech is present:
-   - Transcribe exact spoken English text in "transcript".
-   - Evaluate phoneme accuracy, stress, clarity, and intonation against target "${correctText}".
-   - Provide a fair, accurate score from 0 to 100 in "score". (If student pronounced target correctly or with minor accent, score 80-100; if partially correct, score 50-79; if wrong word or un-understandable, score 0-49).
-   - Provide detailed, constructive feedback in Vietnamese in "feedback", explaining EXACTLY why they got this score (e.g. what sounds were pronounced well, which ending consonant or vowel stress needs improvement).
+Nhiệm vụ:
+1. Nghe và nhận dạng giọng đọc trong file âm thanh (nếu im lặng hoàn toàn hoặc chỉ là tiếng ồn, trả về score: 0 và errors rõ ràng).
+2. So sánh transcript bạn nhận dạng được với "reference_text" để tìm từ bị đọc sai, thiếu, hoặc thừa.
+3. Dựa trên các lỗi phổ biến của người Việt học tiếng Anh (bật thiếu âm cuối /s/, /t/, /d/, âm /θ/, /ð/, phát âm sai trọng âm từ, nối âm...), suy luận khả năng học viên phát âm sai ở đâu.
+4. Chấm điểm theo thang 0-100 dựa trên: độ khớp từ (60%), độ tin cậy nhận dạng (20%), khả năng phát âm đúng trọng âm/ngữ điệu dựa trên nhịp điệu (20%).
+5. Đưa ra 2-3 lỗi cụ thể nhất kèm cách sửa ngắn gọn.
 
-Return strictly JSON matching this structure:
+BẮT BUỘC CHỈ TRẢ VỀ JSON THEO ĐÚNG FORMAT SAU:
 {
-  "isSilent": false,
-  "transcript": "bicycle",
-  "score": 95,
-  "feedback": "Tuyệt vời! Bạn phát âm từ 'bicycle' rất tròn vành, đúng trọng âm đầu /ˈbaɪsɪkl/ và chuẩn âm đuôi /kl/."
+  "score": 85,
+  "transcript": "từ hoặc câu học viên đã đọc",
+  "matched_words": ["word1", "word2"],
+  "errors": [
+    { "word": "bicycle", "issue": "Thiếu âm đuôi /l/ và bật chưa chuẩn trọng âm đầu", "suggestion": "Đọc nhấn giọng ở âm đầu 'BI-cycle' và cong lưỡi nhẹ ở âm cuối /l/" }
+  ],
+  "encouragement": "Em phát âm khá tốt, cố gắng luyện thêm âm cuối nhé!"
 }`;
 
   const postData = JSON.stringify({
@@ -56,7 +57,7 @@ Return strictly JSON matching this structure:
     ],
     generationConfig: {
       responseMimeType: 'application/json',
-      temperature: 0.2
+      temperature: 0.1
     }
   });
 
@@ -180,28 +181,37 @@ const gradeSpeaking = async (user, { exerciseId, correctText, file }) => {
     throw err;
   }
 
-  // 2. Perform AI Evaluation via Gemini Expert Examiner
+  // 2. Perform AI Evaluation via Gemini Teacher Prompt
   const audioBuffer = file.buffer;
   const evalResult = await evaluateSpeakingAudioWithGemini(audioBuffer, file.mimetype, correctText);
 
   let score = 0;
   let transcript = '';
   let feedbackText = '';
+  let errorsList = [];
+  let encouragement = '';
 
   if (evalResult && typeof evalResult.score === 'number') {
-    if (evalResult.isSilent) {
-      score = 0;
-      transcript = '';
-      feedbackText = evalResult.feedback || 'Không phát hiện giọng nói. Vui lòng bấm micro và đọc lại rõ hơn!';
-    } else {
-      score = Math.max(0, Math.min(100, Math.round(evalResult.score)));
-      transcript = evalResult.transcript || '';
-      feedbackText = evalResult.feedback || `Phát âm đạt ${score}%. Bạn đọc là: "${transcript}"`;
+    score = Math.max(0, Math.min(100, Math.round(evalResult.score)));
+    transcript = evalResult.transcript || '';
+    errorsList = Array.isArray(evalResult.errors) ? evalResult.errors : [];
+    encouragement = evalResult.encouragement || '';
+
+    // Build structured persuasive feedback text for student
+    let details = [];
+    if (errorsList.length > 0) {
+      const errStrs = errorsList.map(e => `• Từ "${e.word}": ${e.issue} 👉 Gợi ý: ${e.suggestion}`);
+      details.push(errStrs.join('\n'));
     }
+    if (encouragement) {
+      details.push(`💬 ${encouragement}`);
+    }
+
+    feedbackText = details.length > 0 ? details.join('\n\n') : `Độ chính xác phát âm đạt ${score}%. Em phát âm rất chuẩn!`;
   } else {
     score = 0;
     transcript = '';
-    feedbackText = 'Không nhận diện được phát âm. Vui lòng bấm micro và phát âm rõ từ!';
+    feedbackText = 'Không thể kết nối AI chấm phát âm. Vui lòng kiểm tra quyền micro và bấm đọc lại!';
   }
 
   // 4. Upload to Cloudflare R2 and Save speaking result
