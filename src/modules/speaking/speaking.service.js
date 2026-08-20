@@ -4,14 +4,24 @@ const path = require('path');
 const https = require('https');
 
 // Helper to transcribe audio using Gemini 2.5 Flash
-const transcribeAudioWithGemini = async (audioBuffer, mimeType) => {
-  const apiKey = process.env.GEMINI_API_KEY;
+const env = require('../../config/env');
+
+// Helper to evaluate audio using Gemini 2.5 Flash with strict System Prompt
+const transcribeAudioWithGemini = async (audioBuffer, mimeType, correctText = '') => {
+  const apiKey = process.env.GEMINI_API_KEY || env.geminiApiKey;
   if (!apiKey) {
-    console.warn("No GEMINI_API_KEY found, falling back to mock transcript.");
+    console.warn("No GEMINI_API_KEY found.");
     return null;
   }
 
   const base64Data = audioBuffer.toString('base64');
+  const systemPrompt = `You are a strict English pronunciation AI evaluator for school students.
+Target text to pronounce: "${correctText || ''}"
+
+Evaluate the audio:
+1. If the audio is silent, background noise only, or un-understandable noise without clear speech, return ONLY: SILENT
+2. Otherwise, transcribe EXACTLY what the user spoke in English. Do not add intro, metadata, or markdown.`;
+
   const postData = JSON.stringify({
     contents: [
       {
@@ -23,7 +33,7 @@ const transcribeAudioWithGemini = async (audioBuffer, mimeType) => {
             }
           },
           {
-            text: "Transcribe the English speech in this audio. Return ONLY the transcription text, nothing else. Do not add any punctuation, intro, or metadata. If silent, return empty string."
+            text: systemPrompt
           }
         ]
       }
@@ -54,7 +64,12 @@ const transcribeAudioWithGemini = async (audioBuffer, mimeType) => {
           }
           const parsed = JSON.parse(responseBody);
           const transcriptText = parsed.candidates?.[0]?.content?.parts?.[0]?.text;
-          resolve(transcriptText !== undefined ? transcriptText.trim() : null);
+          const cleaned = transcriptText !== undefined ? transcriptText.trim() : '';
+          if (cleaned.toUpperCase() === 'SILENT') {
+            resolve('');
+          } else {
+            resolve(cleaned);
+          }
         } catch (e) {
           console.error('Error parsing Gemini response:', e);
           resolve(null);
@@ -73,13 +88,14 @@ const transcribeAudioWithGemini = async (audioBuffer, mimeType) => {
 };
 
 const calculateScore = (transcript, correctText) => {
+  if (!transcript || transcript.trim() === '') return 0;
+
   const normalize = (s) => String(s || '').toLowerCase().trim().replace(/[^\w\s]/g, '');
   const transcriptWords = normalize(transcript).split(/\s+/).filter(Boolean);
   const correctWords = normalize(correctText).split(/\s+/).filter(Boolean);
   
-  if (correctWords.length === 0) return 0;
+  if (correctWords.length === 0 || transcriptWords.length === 0) return 0;
   
-  // Strict matching as requested by TASK.md
   let matches = 0;
   correctWords.forEach((word, index) => {
     if (transcriptWords[index] === word) {
@@ -149,17 +165,12 @@ const gradeSpeaking = async (user, { exerciseId, correctText, file }) => {
     throw err;
   }
 
-  // 2. Perform STT via Gemini or mock fallback
+  // 2. Perform STT via Gemini with System Prompt
   const audioBuffer = file.buffer;
-  let transcript = await transcribeAudioWithGemini(audioBuffer, file.mimetype);
+  const transcript = await transcribeAudioWithGemini(audioBuffer, file.mimetype, correctText);
   
-  // If transcription failed (returned null due to API errors), fallback to correctText for stability
-  if (transcript === null) {
-    transcript = correctText; // Mock transcription fallback for API errors only
-  }
-
-  // 3. Compute score
-  const score = calculateScore(transcript, correctText);
+  // 3. Compute score based on real transcript
+  const score = transcript ? calculateScore(transcript, correctText) : 0;
 
   // 4. Upload to Cloudflare R2 and Save speaking result
   const { uploadToR2 } = require('../../utils/r2');
@@ -245,6 +256,7 @@ const gradeSpeaking = async (user, { exerciseId, correctText, file }) => {
 
   return {
     resultId: speakingResult.id,
+    audioUrl: r2Url,
     transcript,
     score,
     attempt: currentAttempt,
