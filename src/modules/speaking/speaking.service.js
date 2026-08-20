@@ -6,8 +6,8 @@ const https = require('https');
 // Helper to transcribe audio using Gemini 2.5 Flash
 const env = require('../../config/env');
 
-// Helper to evaluate audio using Gemini 2.5 Flash with strict System Prompt
-const transcribeAudioWithGemini = async (audioBuffer, mimeType, correctText = '') => {
+// Helper to evaluate audio using Gemini 1.5 Flash with strict System Prompt
+const evaluateSpeakingAudioWithGemini = async (audioBuffer, rawMimeType, correctText = '') => {
   const apiKey = process.env.GEMINI_API_KEY || env.geminiApiKey;
   if (!apiKey) {
     console.warn("No GEMINI_API_KEY found.");
@@ -15,12 +15,26 @@ const transcribeAudioWithGemini = async (audioBuffer, mimeType, correctText = ''
   }
 
   const base64Data = audioBuffer.toString('base64');
-  const systemPrompt = `You are a strict English pronunciation AI evaluator for school students.
-Target text to pronounce: "${correctText || ''}"
+  const cleanMimeType = (rawMimeType || 'audio/webm').split(';')[0].trim();
 
-Evaluate the audio:
-1. If the audio is silent, background noise only, or un-understandable noise without clear speech, return ONLY: SILENT
-2. Otherwise, transcribe EXACTLY what the user spoke in English. Do not add intro, metadata, or markdown.`;
+  const promptText = `You are an expert AI English pronunciation evaluator for Primary & Secondary school students.
+Target English text to pronounce: "${correctText}"
+
+Evaluate the student's audio recording:
+1. Is the audio silent, background noise only, or lacking clear recognizable English speech?
+   If so, return: {"isSilent": true, "score": 0, "transcript": "", "feedback": "Không phát hiện giọng nói. Vui lòng nói rõ hơn!"}
+2. If clear spoken English is detected:
+   - Transcribe what the user said in "transcript".
+   - Evaluate pronunciation accuracy against "${correctText}" on a scale of 0 to 100 in "score".
+   - Give short feedback in Vietnamese in "feedback".
+
+Return ONLY valid JSON matching this schema:
+{
+  "isSilent": false,
+  "transcript": "bicycle",
+  "score": 90,
+  "feedback": "Phát âm rất tốt từ bicycle!"
+}`;
 
   const postData = JSON.stringify({
     contents: [
@@ -28,21 +42,25 @@ Evaluate the audio:
         parts: [
           {
             inlineData: {
-              mimeType: mimeType || 'audio/webm',
+              mimeType: cleanMimeType,
               data: base64Data
             }
           },
           {
-            text: systemPrompt
+            text: promptText
           }
         ]
       }
-    ]
+    ],
+    generationConfig: {
+      responseMimeType: 'application/json',
+      temperature: 0.1
+    }
   });
 
   const options = {
     hostname: 'generativelanguage.googleapis.com',
-    path: `/v1beta/models/gemini-flash-latest:generateContent?key=${apiKey}`,
+    path: `/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -58,20 +76,15 @@ Evaluate the audio:
       res.on('end', () => {
         try {
           if (res.statusCode !== 200) {
-            console.error('Gemini API Error Status:', res.statusCode, responseBody);
+            console.error('Gemini Speaking API Error Status:', res.statusCode, responseBody);
             resolve(null);
             return;
           }
           const parsed = JSON.parse(responseBody);
-          const transcriptText = parsed.candidates?.[0]?.content?.parts?.[0]?.text;
-          const cleaned = transcriptText !== undefined ? transcriptText.trim() : '';
-          if (cleaned.toUpperCase() === 'SILENT') {
-            resolve('');
-          } else {
-            resolve(cleaned);
-          }
+          const rawText = parsed.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
+          resolve(JSON.parse(rawText));
         } catch (e) {
-          console.error('Error parsing Gemini response:', e);
+          console.error('Error parsing Gemini evaluation response:', e);
           resolve(null);
         }
       });
@@ -165,12 +178,29 @@ const gradeSpeaking = async (user, { exerciseId, correctText, file }) => {
     throw err;
   }
 
-  // 2. Perform STT via Gemini with System Prompt
+  // 2. Perform AI Evaluation via Gemini
   const audioBuffer = file.buffer;
-  const transcript = await transcribeAudioWithGemini(audioBuffer, file.mimetype, correctText);
-  
-  // 3. Compute score based on real transcript
-  const score = transcript ? calculateScore(transcript, correctText) : 0;
+  const evalResult = await evaluateSpeakingAudioWithGemini(audioBuffer, file.mimetype, correctText);
+
+  let score = 0;
+  let transcript = '';
+  let feedbackText = '';
+
+  if (evalResult && typeof evalResult.score === 'number') {
+    if (evalResult.isSilent || evalResult.score === 0 || !evalResult.transcript) {
+      score = 0;
+      transcript = '';
+      feedbackText = evalResult.feedback || 'Không phát hiện giọng nói. Vui lòng bấm micro và đọc lại rõ hơn!';
+    } else {
+      score = Math.max(0, Math.min(100, Math.round(evalResult.score)));
+      transcript = evalResult.transcript || '';
+      feedbackText = evalResult.feedback || `Phát âm đạt ${score}%. Bạn đọc là: "${transcript}"`;
+    }
+  } else {
+    score = 0;
+    transcript = '';
+    feedbackText = 'Không nhận diện được phát âm. Vui lòng bấm micro và phát âm rõ từ!';
+  }
 
   // 4. Upload to Cloudflare R2 and Save speaking result
   const { uploadToR2 } = require('../../utils/r2');
