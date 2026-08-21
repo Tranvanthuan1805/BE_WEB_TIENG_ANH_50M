@@ -101,10 +101,13 @@ BẮT BUỘC CHỈ TRẢ VỀ JSON THEO ĐÚNG FORMAT SAU:
     });
   };
 
-  // Try 1.5-flash first, fallback to 2.0-flash
-  let result = await callGeminiModel('gemini-1.5-flash');
+  // Try gemini-flash-latest first, fallback to gemini-pro-latest or gemini-flash-lite-latest
+  let result = await callGeminiModel('gemini-flash-latest');
   if (!result) {
-    result = await callGeminiModel('gemini-2.0-flash');
+    result = await callGeminiModel('gemini-pro-latest');
+  }
+  if (!result) {
+    result = await callGeminiModel('gemini-flash-lite-latest');
   }
   return result;
 };
