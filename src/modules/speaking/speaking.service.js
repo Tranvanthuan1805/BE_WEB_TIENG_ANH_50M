@@ -60,6 +60,15 @@ BẮT BUỘC CHỈ TRẢ VỀ JSON THEO ĐÚNG FORMAT SAU:
 
   const callGeminiModel = (modelName) => {
     return new Promise((resolve) => {
+      let isSettled = false;
+      const timer = setTimeout(() => {
+        if (!isSettled) {
+          isSettled = true;
+          console.warn(`Gemini (${modelName}) timed out after 3500ms.`);
+          resolve(null);
+        }
+      }, 3500);
+
       const options = {
         hostname: 'generativelanguage.googleapis.com',
         path: `/v1beta/models/${modelName}:generateContent?key=${apiKey}`,
@@ -75,6 +84,9 @@ BẮT BUỘC CHỈ TRẢ VỀ JSON THEO ĐÚNG FORMAT SAU:
         let responseBody = '';
         res.on('data', (chunk) => { responseBody += chunk; });
         res.on('end', () => {
+          if (isSettled) return;
+          isSettled = true;
+          clearTimeout(timer);
           try {
             if (res.statusCode !== 200) {
               console.error(`Gemini (${modelName}) Error Status:`, res.statusCode, responseBody);
@@ -92,6 +104,9 @@ BẮT BUỘC CHỈ TRẢ VỀ JSON THEO ĐÚNG FORMAT SAU:
       });
 
       req.on('error', (e) => {
+        if (isSettled) return;
+        isSettled = true;
+        clearTimeout(timer);
         console.error(`Gemini (${modelName}) request error:`, e);
         resolve(null);
       });
@@ -101,45 +116,29 @@ BẮT BUỘC CHỈ TRẢ VỀ JSON THEO ĐÚNG FORMAT SAU:
     });
   };
 
-  // Try gemini-flash-latest first, fallback to gemini-pro-latest or gemini-flash-lite-latest
+  // Try gemini-flash-latest first with fast timeout, fallback to smart evaluation if needed
   let result = await callGeminiModel('gemini-flash-latest');
-  if (!result) {
-    result = await callGeminiModel('gemini-pro-latest');
-  }
-  if (!result) {
-    result = await callGeminiModel('gemini-flash-lite-latest');
-  }
   return result;
 };
 
 // Fallback intelligent evaluator
 const generateSmartFallbackEvaluation = (correctText, audioBuffer) => {
   const audioSize = audioBuffer ? audioBuffer.length : 0;
-  const isAudioValid = audioSize > 3000; // > 3KB sound data recorded
+  // Short recording (<12KB) or silent audio
+  const isAudioTooSmall = audioSize < 12000;
 
-  if (!isAudioValid) {
+  if (isAudioTooSmall) {
     return {
       score: 0,
-      transcript: '(Chưa ghi nhận được âm thanh)',
-      errors: [{ word: correctText, issue: 'Âm thanh quá nhỏ hoặc chưa thu được tiếng' }]
+      transcript: '(Chưa ghi nhận được âm thanh / Im lặng)',
+      errors: [{ word: correctText, issue: 'Âm thanh quá nhỏ hoặc chưa thu được giọng đọc' }]
     };
   }
 
-  // Simulate realistic score between 75-95
-  const baseScore = Math.floor(Math.random() * 16) + 80;
-  const errors = [];
-  
-  const refLower = (correctText || '').toLowerCase();
-  if (refLower.includes('k') || refLower.includes('work')) {
-    if (Math.random() < 0.3) {
-      errors.push({ word: 'work', issue: 'Âm bật cuối /k/ hơi nhẹ', wrong_phone: 'k' });
-    }
-  }
-
   return {
-    score: errors.length > 0 ? Math.min(baseScore, 74) : baseScore,
-    transcript: correctText,
-    errors
+    score: 0,
+    transcript: '(Chưa nhận diện được giọng đọc)',
+    errors: [{ word: correctText, issue: 'Chưa phát âm đúng từ vựng yêu cầu' }]
   };
 };
 
@@ -206,88 +205,67 @@ const gradeSpeaking = async (user, { exerciseId, correctText, file }) => {
 
   // 3. Generate detailed Syllable and Phone breakdown with status
   const wordsBreakdown = breakdownSentenceToPhones(correctText, score, errorsList);
+  const earnedStars = score >= 80 ? 3 : score >= 50 ? 2 : 1;
 
-  // 4. Upload to Cloudflare R2 and Save speaking result
-  let r2Url = '';
-  try {
-    const { uploadToR2 } = require('../../utils/r2');
-    const ext = path.extname(file.originalname) || '.webm';
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    const r2FileName = `speaking-${uniqueSuffix}${ext}`;
-    r2Url = await uploadToR2(audioBuffer, r2FileName, file.mimetype);
-  } catch (e) {
-    console.warn('R2 Upload skipped or failed, fallback to empty url:', e.message);
-  }
+  // 4. Background non-blocking R2 Upload & DB saving
+  setImmediate(async () => {
+    try {
+      let r2Url = '';
+      try {
+        const { uploadToR2 } = require('../../utils/r2');
+        const ext = path.extname(file.originalname) || '.webm';
+        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+        const r2FileName = `speaking-${uniqueSuffix}${ext}`;
+        r2Url = await uploadToR2(audioBuffer, r2FileName, file.mimetype);
+      } catch (e) {}
 
-  let speakingResult = null;
-  try {
-    speakingResult = await prisma.speakingResult.create({
-      data: {
-        userId: user.id,
-        exerciseId: targetExerciseId,
-        audioUrl: r2Url || 'local_audio',
-        aiScore: score,
-        feedback: `Độ chính xác: ${score}%. Bạn đọc là: "${transcript}"`
-      }
-    });
-  } catch (e) {
-    console.warn('Error saving speaking result:', e.message);
-  }
-
-  // 5. Update or insert Score table with highest score
-  try {
-    const existingScore = await prisma.score.findFirst({
-      where: { userId: user.id, exerciseId: targetExerciseId }
-    });
-
-    if (!existingScore) {
-      await prisma.score.create({
+      await prisma.speakingResult.create({
         data: {
           userId: user.id,
           exerciseId: targetExerciseId,
-          score: score
+          audioUrl: r2Url || 'local_audio',
+          aiScore: score,
+          feedback: `Độ chính xác: ${score}%. Bạn đọc là: "${transcript}"`
         }
       });
-    } else if (score > existingScore.score) {
-      await prisma.score.update({
-        where: { id: existingScore.id },
-        data: { score: score }
-      });
-    }
-  } catch (e) {
-    console.warn('Error updating score:', e.message);
-  }
 
-  // 6. Award Stars in Gamification
-  const earnedStars = score >= 80 ? 3 : score >= 50 ? 2 : 1;
-  try {
-    let gamification = await prisma.gamification.findUnique({
-      where: { userId: user.id }
-    });
+      const existingScore = await prisma.score.findFirst({
+        where: { userId: user.id, exerciseId: targetExerciseId }
+      });
 
-    if (!gamification) {
-      await prisma.gamification.create({
-        data: {
-          userId: user.id,
-          stars: earnedStars,
-          totalPoints: earnedStars * 10,
-          streak: 1
-        }
+      if (!existingScore) {
+        await prisma.score.create({
+          data: { userId: user.id, exerciseId: targetExerciseId, score: score }
+        });
+      } else if (score > existingScore.score) {
+        await prisma.score.update({
+          where: { id: existingScore.id },
+          data: { score: score }
+        });
+      }
+
+      let gamification = await prisma.gamification.findUnique({
+        where: { userId: user.id }
       });
-    } else {
-      const now = new Date();
-      await prisma.gamification.update({
-        where: { id: gamification.id },
-        data: {
-          stars: gamification.stars + earnedStars,
-          totalPoints: gamification.totalPoints + (earnedStars * 10),
-          lastActive: now
-        }
-      });
+
+      if (!gamification) {
+        await prisma.gamification.create({
+          data: { userId: user.id, stars: earnedStars, totalPoints: earnedStars * 10, streak: 1 }
+        });
+      } else {
+        await prisma.gamification.update({
+          where: { id: gamification.id },
+          data: {
+            stars: gamification.stars + earnedStars,
+            totalPoints: gamification.totalPoints + (earnedStars * 10),
+            lastActive: new Date()
+          }
+        });
+      }
+    } catch (bgErr) {
+      console.warn('Background save notice:', bgErr.message);
     }
-  } catch (e) {
-    console.warn('Error updating gamification:', e.message);
-  }
+  });
 
   const currentAttempt = attemptsCount + 1;
   const canRetry = currentAttempt < 3;

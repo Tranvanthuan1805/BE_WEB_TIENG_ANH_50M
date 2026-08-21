@@ -226,6 +226,32 @@ const PHONETIC_DICT = {
       }
     ]
   },
+  bicycle: {
+    ipa: '/ˈbaɪsɪkl/',
+    syllables: [
+      {
+        syllable: 'bi',
+        phones: [
+          { phone: 'b', type: 'consonant' },
+          { phone: 'aɪ', type: 'vowel' }
+        ]
+      },
+      {
+        syllable: 'cy',
+        phones: [
+          { phone: 's', type: 'consonant' },
+          { phone: 'ɪ', type: 'vowel' }
+        ]
+      },
+      {
+        syllable: 'cle',
+        phones: [
+          { phone: 'k', type: 'consonant' },
+          { phone: 'l', type: 'consonant' }
+        ]
+      }
+    ]
+  },
   banana: {
     ipa: '/bəˈnænə/',
     syllables: [
@@ -320,13 +346,13 @@ function breakdownSentenceToPhones(text, overallScore = 90, errors = []) {
 
         // If error exists, identify wrong phone (often final consonant or vowels)
         if (errorMatch && (phIdx === syl.phones.length - 1 || ph.type === 'vowel')) {
-          phoneScore = Math.floor(Math.random() * 20) + 40; // 40-60
-          status = phoneScore < 55 ? 'Poor' : 'Warning';
+          phoneScore = Math.floor(Math.random() * 16) + 40; // 40-55
+          status = 'Poor';
         } else if (overallScore < 70 && phIdx === syl.phones.length - 1) {
           // Vietnamese common final consonant drop
-          phoneScore = Math.floor(Math.random() * 25) + 45;
+          phoneScore = Math.floor(Math.random() * 15) + 45;
           status = 'Poor';
-        } else if (phoneScore >= 80) {
+        } else if (phoneScore >= 75) {
           status = 'Good';
         } else if (phoneScore >= 60) {
           status = 'Good';
@@ -334,11 +360,14 @@ function breakdownSentenceToPhones(text, overallScore = 90, errors = []) {
           status = 'Poor';
         }
 
+        const errorPct = 100 - phoneScore;
+
         return {
           phone: ph.phone,
           type: ph.type,
           score: phoneScore,
-          status: status // 'Good' | 'Warning' | 'Poor'
+          errorPct: errorPct,
+          status: status // 'Good' | 'Poor'
         };
       });
 
@@ -353,7 +382,7 @@ function breakdownSentenceToPhones(text, overallScore = 90, errors = []) {
       cleanWord,
       ipa: meta.ipa,
       score: wordScore,
-      status: wordScore >= 75 ? 'Good' : (wordScore >= 60 ? 'Warning' : 'Poor'),
+      status: wordScore >= 75 ? 'Good' : 'Poor',
       syllables
     };
   });
