@@ -149,32 +149,38 @@ const gradeSpeaking = async (user, { exerciseId, correctText, file }) => {
     throw err;
   }
 
-  // Fall-safe: Verify exercise exists. If not, look up or create a dummy one
-  let targetExerciseId = exerciseId;
-  try {
-    const exercise = await prisma.exercise.findFirst({ where: { id: exerciseId } });
-    if (!exercise) {
-      const anySpeakingEx = await prisma.exercise.findFirst({
-        where: { type: 'SPEAKING', isDeleted: false }
-      });
-      if (anySpeakingEx) {
-        targetExerciseId = anySpeakingEx.id;
+  const isValidHexId = (id) => typeof id === 'string' && /^[0-9a-fA-F]{24}$/.test(id);
+
+  // Fall-safe: Verify exercise exists. If not, look up or fallback to null
+  let targetExerciseId = isValidHexId(exerciseId) ? exerciseId : null;
+  if (targetExerciseId) {
+    try {
+      const exercise = await prisma.exercise.findFirst({ where: { id: targetExerciseId } });
+      if (!exercise) {
+        const anySpeakingEx = await prisma.exercise.findFirst({
+          where: { type: 'SPEAKING', isDeleted: false }
+        });
+        if (anySpeakingEx) {
+          targetExerciseId = anySpeakingEx.id;
+        }
       }
+    } catch (e) {
+      // ObjectId issue fallback
     }
-  } catch (e) {
-    // ObjectId issue fallback
   }
 
   // 1. Fetch previous attempts for user + exercise (limit 3 attempts)
   let previousResults = [];
-  try {
-    previousResults = await prisma.speakingResult.findMany({
-      where: { userId: user.id, exerciseId: targetExerciseId },
-      orderBy: { createdAt: 'asc' },
-      take: 3
-    });
-  } catch (e) {
-    console.warn('Error fetching previous attempts:', e.message);
+  if (user?.id && isValidHexId(user.id) && targetExerciseId) {
+    try {
+      previousResults = await prisma.speakingResult.findMany({
+        where: { userId: user.id, exerciseId: targetExerciseId },
+        orderBy: { createdAt: 'asc' },
+        take: 3
+      });
+    } catch (e) {
+      console.warn('Error fetching previous attempts:', e.message);
+    }
   }
 
   const attemptsCount = previousResults.length;
@@ -219,48 +225,52 @@ const gradeSpeaking = async (user, { exerciseId, correctText, file }) => {
         r2Url = await uploadToR2(audioBuffer, r2FileName, file.mimetype);
       } catch (e) {}
 
-      await prisma.speakingResult.create({
-        data: {
-          userId: user.id,
-          exerciseId: targetExerciseId,
-          audioUrl: r2Url || 'local_audio',
-          aiScore: score,
-          feedback: `Độ chính xác: ${score}%. Bạn đọc là: "${transcript}"`
-        }
-      });
-
-      const existingScore = await prisma.score.findFirst({
-        where: { userId: user.id, exerciseId: targetExerciseId }
-      });
-
-      if (!existingScore) {
-        await prisma.score.create({
-          data: { userId: user.id, exerciseId: targetExerciseId, score: score }
-        });
-      } else if (score > existingScore.score) {
-        await prisma.score.update({
-          where: { id: existingScore.id },
-          data: { score: score }
-        });
-      }
-
-      let gamification = await prisma.gamification.findUnique({
-        where: { userId: user.id }
-      });
-
-      if (!gamification) {
-        await prisma.gamification.create({
-          data: { userId: user.id, stars: earnedStars, totalPoints: earnedStars * 10, streak: 1 }
-        });
-      } else {
-        await prisma.gamification.update({
-          where: { id: gamification.id },
+      if (user?.id && isValidHexId(user.id) && targetExerciseId) {
+        await prisma.speakingResult.create({
           data: {
-            stars: gamification.stars + earnedStars,
-            totalPoints: gamification.totalPoints + (earnedStars * 10),
-            lastActive: new Date()
+            userId: user.id,
+            exerciseId: targetExerciseId,
+            audioUrl: r2Url || 'local_audio',
+            aiScore: score,
+            feedback: `Độ chính xác: ${score}%. Bạn đọc là: "${transcript}"`
           }
         });
+
+        const existingScore = await prisma.score.findFirst({
+          where: { userId: user.id, exerciseId: targetExerciseId }
+        });
+
+        if (!existingScore) {
+          await prisma.score.create({
+            data: { userId: user.id, exerciseId: targetExerciseId, score: score }
+          });
+        } else if (score > existingScore.score) {
+          await prisma.score.update({
+            where: { id: existingScore.id },
+            data: { score: score }
+          });
+        }
+      }
+
+      if (user?.id && isValidHexId(user.id)) {
+        let gamification = await prisma.gamification.findUnique({
+          where: { userId: user.id }
+        });
+
+        if (!gamification) {
+          await prisma.gamification.create({
+            data: { userId: user.id, stars: earnedStars, totalPoints: earnedStars * 10, streak: 1 }
+          });
+        } else {
+          await prisma.gamification.update({
+            where: { id: gamification.id },
+            data: {
+              stars: gamification.stars + earnedStars,
+              totalPoints: gamification.totalPoints + (earnedStars * 10),
+              lastActive: new Date()
+            }
+          });
+        }
       }
     } catch (bgErr) {
       console.warn('Background save notice:', bgErr.message);
@@ -283,8 +293,8 @@ const gradeSpeaking = async (user, { exerciseId, correctText, file }) => {
   ];
 
   return {
-    resultId: speakingResult ? speakingResult.id : 'demo-id',
-    audioUrl: r2Url,
+    resultId: `speaking-${Date.now()}`,
+    audioUrl: 'local_audio',
     transcript,
     score,
     latestScore: score,

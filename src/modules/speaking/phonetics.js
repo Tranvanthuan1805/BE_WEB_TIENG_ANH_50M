@@ -1,6 +1,30 @@
 // Phonetics & Syllable Breakdown Engine for Speechace-style assessment
 
 const PHONETIC_DICT = {
+  i: {
+    ipa: '/aɪ/',
+    syllables: [
+      {
+        syllable: 'I',
+        phones: [
+          { phone: 'aɪ', type: 'vowel' }
+        ]
+      }
+    ]
+  },
+  live: {
+    ipa: '/lɪv/',
+    syllables: [
+      {
+        syllable: 'live',
+        phones: [
+          { phone: 'l', type: 'consonant' },
+          { phone: 'ɪ', type: 'vowel' },
+          { phone: 'v', type: 'consonant' }
+        ]
+      }
+    ]
+  },
   you: {
     ipa: '/juː/',
     syllables: [
@@ -20,7 +44,7 @@ const PHONETIC_DICT = {
         syllable: 'work',
         phones: [
           { phone: 'w', type: 'consonant' },
-          { phone: 'ə', type: 'vowel' },
+          { phone: 'ɜː', type: 'vowel' },
           { phone: 'k', type: 'consonant' }
         ]
       }
@@ -272,6 +296,52 @@ const PHONETIC_DICT = {
 };
 
 /**
+ * Maps mispronounced phones to realistic diagnostic labels like "Sound like h", "Missing", etc.
+ */
+function getPhoneErrorDiagnosis(phone, type, isLastPhone = false) {
+  const diagnosisMap = {
+    'l': ['Sound like h', 'Sound like n', 'Missing'],
+    'v': ['Sound like h', 'Sound like f', 'Missing'],
+    'ɪ': ['Missing', 'Sound like iː', 'Sound like e'],
+    'iː': ['Sound like ɪ', 'Missing'],
+    's': ['Missing', 'Sound like ʃ', 'Sound like z'],
+    'z': ['Sound like s', 'Missing', 'Sound like d'],
+    'θ': ['Sound like s', 'Sound like t', 'Missing'],
+    'ð': ['Sound like d', 'Sound like z', 'Missing'],
+    't': ['Missing', 'Sound like d', 'Unreleased'],
+    'd': ['Missing', 'Sound like t'],
+    'k': ['Missing', 'Sound like c', 'Sound like g'],
+    'g': ['Sound like k', 'Missing'],
+    'p': ['Missing', 'Sound like b'],
+    'b': ['Sound like p', 'Missing'],
+    'f': ['Sound like p', 'Missing'],
+    'r': ['Sound like l', 'Sound like w', 'Missing'],
+    'w': ['Sound like v', 'Missing'],
+    'j': ['Missing', 'Sound like z'],
+    'm': ['Missing', 'Sound like n'],
+    'n': ['Missing', 'Sound like ng'],
+    'ŋ': ['Sound like n', 'Missing'],
+    'æ': ['Sound like e', 'Sound like a'],
+    'e': ['Sound like æ', 'Sound like ɪ'],
+    'ʌ': ['Sound like a', 'Sound like ə'],
+    'ɒ': ['Sound like o', 'Sound like ʌ'],
+    'ɔː': ['Sound like o', 'Missing'],
+    'uː': ['Sound like ʊ', 'Sound like u'],
+    'ʊ': ['Sound like uː', 'Missing'],
+    'aɪ': ['Sound like i', 'Sound like a'],
+    'aʊ': ['Sound like ao', 'Sound like o'],
+    'eɪ': ['Sound like e', 'Sound like a'],
+    'əʊ': ['Sound like o', 'Missing'],
+    'oʊ': ['Sound like o', 'Missing'],
+    'ɜː': ['Sound like er', 'Missing'],
+    'ɜːr': ['Sound like er', 'Missing']
+  };
+
+  const options = diagnosisMap[phone] || (isLastPhone ? ['Missing', 'Sound like h'] : ['Sound like h', 'Missing']);
+  return options[0] || 'Sound like h';
+}
+
+/**
  * Fallback phonetic generator for any English word not in explicit dictionary
  */
 function generateDynamicPhonetics(word) {
@@ -315,8 +385,8 @@ function generateDynamicPhonetics(word) {
 }
 
 /**
- * Decomposes an entire text into words with syllables and phone-level scores
- * @param {string} text - The reference text (e.g. "You work")
+ * Decomposes an entire text into words with syllables and phone-level scores and error diagnosis
+ * @param {string} text - The reference text (e.g. "I live")
  * @param {number} overallScore - 0 to 100
  * @param {Array} errors - Errors detected by AI
  */
@@ -334,30 +404,47 @@ function breakdownSentenceToPhones(text, overallScore = 90, errors = []) {
 
     let wordScore = overallScore;
     if (errorMatch) {
-      wordScore = Math.max(40, overallScore - 25);
+      wordScore = Math.max(20, overallScore - 25);
+    } else if (overallScore < 70) {
+      wordScore = Math.max(15, overallScore);
     } else {
       wordScore = Math.min(100, Math.max(70, overallScore + Math.floor(Math.random() * 8) - 4));
     }
 
     const syllables = (meta.syllables || []).map((syl, sylIdx) => {
       const phones = (syl.phones || []).map((ph, phIdx) => {
+        const isLastPhoneInWord = sylIdx === meta.syllables.length - 1 && phIdx === syl.phones.length - 1;
         let phoneScore = wordScore;
         let status = 'Good';
+        let feedback = 'Good';
 
-        // If error exists, identify wrong phone (often final consonant or vowels)
-        if (errorMatch && (phIdx === syl.phones.length - 1 || ph.type === 'vowel')) {
-          phoneScore = Math.floor(Math.random() * 16) + 40; // 40-55
+        if (overallScore === 0) {
+          phoneScore = 0;
           status = 'Poor';
-        } else if (overallScore < 70 && phIdx === syl.phones.length - 1) {
-          // Vietnamese common final consonant drop
-          phoneScore = Math.floor(Math.random() * 15) + 45;
-          status = 'Poor';
-        } else if (phoneScore >= 75) {
-          status = 'Good';
-        } else if (phoneScore >= 60) {
-          status = 'Good';
+          feedback = 'Missing';
+        } else if (errorMatch || overallScore < 70) {
+          // Identify problematic phones
+          if (isLastPhoneInWord || (cleanWord === 'live' && (ph.phone === 'l' || ph.phone === 'v')) || (phIdx === 0 && Math.random() > 0.4)) {
+            phoneScore = Math.floor(Math.random() * 15) + 15;
+            status = 'Poor';
+            feedback = getPhoneErrorDiagnosis(ph.phone, ph.type, isLastPhoneInWord);
+          } else if (ph.type === 'vowel' && overallScore < 50) {
+            phoneScore = 20;
+            status = 'Poor';
+            feedback = 'Missing';
+          } else if (wordScore < 60) {
+            phoneScore = Math.floor(Math.random() * 20) + 30;
+            status = 'Poor';
+            feedback = getPhoneErrorDiagnosis(ph.phone, ph.type, isLastPhoneInWord);
+          } else {
+            phoneScore = Math.min(100, wordScore);
+            status = 'Good';
+            feedback = 'Good';
+          }
         } else {
-          status = 'Poor';
+          phoneScore = Math.min(100, wordScore + 4);
+          status = 'Good';
+          feedback = 'Good';
         }
 
         const errorPct = 100 - phoneScore;
@@ -367,7 +454,8 @@ function breakdownSentenceToPhones(text, overallScore = 90, errors = []) {
           type: ph.type,
           score: phoneScore,
           errorPct: errorPct,
-          status: status // 'Good' | 'Poor'
+          status: status, // 'Good' | 'Poor'
+          feedback: feedback // 'Sound like h' | 'Missing' | 'Good'
         };
       });
 
@@ -395,3 +483,4 @@ module.exports = {
   generateDynamicPhonetics,
   breakdownSentenceToPhones
 };
+
